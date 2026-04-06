@@ -5,6 +5,7 @@ import { MessageSquare, Send, X, Sparkles, Bot } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
 import { AIChatbot } from './AIChatbot';
+import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
 
 import { toast } from 'react-hot-toast';
 
@@ -14,28 +15,48 @@ interface SupportConfig {
   enabled: boolean;
 }
 
+interface ChatbotConfig {
+  enabled: boolean;
+  botName: string;
+  systemPrompt: string;
+}
+
 export const FloatingSupport: React.FC = () => {
   const [config, setConfig] = useState<SupportConfig | null>(null);
+  const [chatbotConfig, setChatbotConfig] = useState<ChatbotConfig | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'settings', 'support'), (doc) => {
+    const unsubSupport = onSnapshot(doc(db, 'settings', 'support'), (doc) => {
       if (doc.exists()) {
         setConfig(doc.data() as SupportConfig);
       }
     }, (error: any) => {
-      console.error("Firestore Error (Support):", error);
+      handleFirestoreError(error, OperationType.GET, 'settings/support');
       if (error.code === 'resource-exhausted') {
         toast.error("Database quota exceeded. Please try again tomorrow.");
       }
     });
-    return () => unsub();
+
+    const unsubChatbot = onSnapshot(doc(db, 'settings', 'chatbot'), (doc) => {
+      if (doc.exists()) {
+        setChatbotConfig(doc.data() as ChatbotConfig);
+      }
+    }, (error: any) => {
+      handleFirestoreError(error, OperationType.GET, 'settings/chatbot');
+    });
+
+    return () => {
+      unsubSupport();
+      unsubChatbot();
+    };
   }, []);
 
   if (!config || !config.enabled) return null;
 
   const hasWhatsapp = !!config.whatsapp;
+  const isChatbotEnabled = chatbotConfig?.enabled ?? true;
 
   return (
     <div className="fixed bottom-6 right-6 z-[60] flex flex-col items-end gap-4">
@@ -62,20 +83,22 @@ export const FloatingSupport: React.FC = () => {
                 <MessageSquare className="w-7 h-7" />
               </motion.a>
             )}
-            <motion.button
-              initial={{ opacity: 0, scale: 0.5, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.5, y: 20 }}
-              transition={{ delay: 0.05 }}
-              onClick={() => {
-                setIsChatOpen(true);
-                setIsOpen(false);
-              }}
-              className="w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-full flex items-center justify-center shadow-xl hover:scale-110 transition-transform"
-              title="AI Chatbot"
-            >
-              <Bot className="w-7 h-7" />
-            </motion.button>
+            {isChatbotEnabled && (
+              <motion.button
+                initial={{ opacity: 0, scale: 0.5, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.5, y: 20 }}
+                transition={{ delay: 0.05 }}
+                onClick={() => {
+                  setIsChatOpen(true);
+                  setIsOpen(false);
+                }}
+                className="w-14 h-14 bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-full flex items-center justify-center shadow-xl hover:scale-110 transition-transform"
+                title="AI Chatbot"
+              >
+                <Bot className="w-7 h-7" />
+              </motion.button>
+            )}
           </div>
         )}
       </AnimatePresence>

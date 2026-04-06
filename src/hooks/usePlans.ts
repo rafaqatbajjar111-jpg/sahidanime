@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { collection, onSnapshot, doc, setDoc, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
 import { PLANS as DEFAULT_PLANS, PAYMENT_METHODS as DEFAULT_PAYMENT_METHODS } from '../constants';
+import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
 
 export interface Plan {
   id: string;
@@ -36,12 +37,18 @@ export const usePlans = () => {
       if (snapshot.empty) {
         // Initialize with defaults if empty
         DEFAULT_PLANS.forEach(async (plan) => {
-          await setDoc(doc(db, 'plans', plan.id), plan);
+          try {
+            await setDoc(doc(db, 'plans', plan.id), plan);
+          } catch (e) {
+            // Silently fail if not admin, as this is just a convenience initialization
+          }
         });
       } else {
         const plansList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Plan));
         setPlans(plansList);
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'plans');
     });
 
     // Listen for payment methods
@@ -49,7 +56,11 @@ export const usePlans = () => {
       if (snapshot.empty) {
         // Initialize with defaults if empty
         Object.entries(DEFAULT_PAYMENT_METHODS).forEach(async ([key, method]) => {
-          await setDoc(doc(db, 'paymentMethods', key), method as any);
+          try {
+            await setDoc(doc(db, 'paymentMethods', key), method as any);
+          } catch (e) {
+            // Silently fail if not admin
+          }
         });
       } else {
         const methods: { [key: string]: PaymentMethod } = {};
@@ -58,6 +69,9 @@ export const usePlans = () => {
         });
         setPaymentMethods(methods);
       }
+      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'paymentMethods');
       setLoading(false);
     });
 

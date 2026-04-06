@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, setDoc, deleteDoc, doc, serverTimestamp, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
+import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
 import { 
   Ticket, 
   Plus, 
@@ -65,7 +66,7 @@ export const AdminRedeemCodes: React.FC = () => {
       setCodes(codeList);
       setLoading(false);
     }, (error) => {
-      console.error("Redeem Codes Snapshot Error:", error);
+      handleFirestoreError(error, OperationType.LIST, 'redeemCodes');
       setLoading(false);
     });
     return () => unsub();

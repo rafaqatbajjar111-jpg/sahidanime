@@ -138,7 +138,7 @@ export const Login: React.FC = () => {
         <div className="text-center mb-8">
           <motion.div 
             whileHover={{ scale: 1.05 }}
-            className="inline-flex items-center gap-3 mb-6"
+            className="inline-flex items-center gap-5 mb-8"
           >
             <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-blue-500 shadow-2xl shadow-blue-500/20">
               <img 
@@ -148,7 +148,10 @@ export const Login: React.FC = () => {
               />
             </div>
             <div className="text-left">
-              <h2 className="text-2xl font-black tracking-tighter text-white leading-none">SAHIDANIME</h2>
+              <h2 className="text-2xl font-black tracking-tight text-white leading-none flex gap-2">
+                <span>SAHID</span>
+                <span className="text-blue-500">ANIME</span>
+              </h2>
               <p className="text-blue-500 text-[10px] font-bold tracking-[0.2em] uppercase">Anime Streaming</p>
             </div>
           </motion.div>

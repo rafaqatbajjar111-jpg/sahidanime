@@ -8,6 +8,7 @@ import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePlans } from '../hooks/usePlans';
 import { getSubscriptionExpiration } from '../lib/subscriptionUtils';
+import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
 
 interface Request {
   id: string;
@@ -46,7 +47,7 @@ export const AdminRequests: React.FC = () => {
       setRequests(list.sort((a, b) => b.createdAt?.seconds - a.createdAt?.seconds));
       setLoading(false);
     }, (error) => {
-      console.error("Admin Requests Fetch Error:", error);
+      handleFirestoreError(error, OperationType.LIST, 'purchaseRequests');
       setLoading(false);
     });
     return () => unsub();

@@ -39,6 +39,12 @@ interface SupportConfig {
   enabled: boolean;
 }
 
+interface ChatbotConfig {
+  enabled: boolean;
+  botName: string;
+  systemPrompt: string;
+}
+
 export const AdminSettings: React.FC = () => {
   const { user, userData } = useAuth();
   const [config, setConfig] = useState<TelegramConfig>({
@@ -50,6 +56,24 @@ export const AdminSettings: React.FC = () => {
     telegram: '',
     whatsapp: '',
     enabled: false
+  });
+  const [chatbotConfig, setChatbotConfig] = useState<ChatbotConfig>({
+    enabled: true,
+    botName: 'SahidAnime Assistant',
+    systemPrompt: `You are SahidAnime AI Assistant. You are helpful, polite, and knowledgeable about the SahidAnime website.
+Website Details:
+- Name: SahidAnime
+- Purpose: Anime streaming platform.
+- Social Media: WhatsApp (https://whatsapp.com/channel/0029Vahd4QT9Gv7M1esnDz46), Facebook (https://www.facebook.com/SahidAnime4u), Telegram (https://t.me/BTTH_HindiDub).
+- Special Content: BTTH (Battle Through The Heavens) is a popular series here. Episode 189 and some others are paid content.
+
+Capabilities:
+- You can help users find anime.
+- You can explain subscription plans.
+- You can guide users on how to pay and get access.
+- You should encourage users to join the WhatsApp channel and watch the QNA video (https://youtu.be/Ib5Hoi2r598).
+
+Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -80,6 +104,12 @@ export const AdminSettings: React.FC = () => {
         if (supportSnap.exists()) {
           setSupportConfig(supportSnap.data() as SupportConfig);
         }
+
+        const chatbotRef = doc(db, 'settings', 'chatbot');
+        const chatbotSnap = await getDoc(chatbotRef);
+        if (chatbotSnap.exists()) {
+          setChatbotConfig(chatbotSnap.data() as ChatbotConfig);
+        }
       } catch (error) {
         console.error("Error fetching config:", error);
         toast.error("Failed to load settings");
@@ -96,6 +126,7 @@ export const AdminSettings: React.FC = () => {
     try {
       await setDoc(doc(db, 'settings', 'telegram'), config);
       await setDoc(doc(db, 'settings', 'support'), supportConfig);
+      await setDoc(doc(db, 'settings', 'chatbot'), chatbotConfig);
       toast.success("Settings saved successfully");
     } catch (error) {
       console.error("Error saving config:", error);
@@ -369,6 +400,75 @@ export const AdminSettings: React.FC = () => {
             className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
           >
             {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Save className="w-5 h-5" /> Save Support Settings</>}
+          </button>
+        </motion.div>
+
+        {/* Chatbot Settings Card */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.08 }}
+          className="bg-zinc-900/50 border border-zinc-800 rounded-[2.5rem] p-8 space-y-8"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-indigo-500/10 rounded-2xl flex items-center justify-center">
+                <MessageSquare className="w-6 h-6 text-indigo-500" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">Chatbot Settings</h2>
+                <p className="text-sm text-zinc-500">Control AI Assistant behavior and details</p>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input 
+                type="checkbox" 
+                className="sr-only peer"
+                checked={chatbotConfig.enabled}
+                onChange={(e) => setChatbotConfig({ ...chatbotConfig, enabled: e.target.checked })}
+              />
+              <div className="w-11 h-6 bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+            </label>
+          </div>
+
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-xs font-black uppercase tracking-widest text-zinc-500 ml-1">Bot Name</label>
+              <div className="relative group">
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:text-indigo-500 transition-colors" />
+                <input 
+                  type="text"
+                  placeholder="SahidAnime Assistant"
+                  value={chatbotConfig.botName}
+                  onChange={(e) => setChatbotConfig({ ...chatbotConfig, botName: e.target.value })}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-indigo-500 transition-all"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-black uppercase tracking-widest text-zinc-500 ml-1">System Prompt (Behavior & Details)</label>
+              <div className="relative group">
+                <textarea 
+                  rows={8}
+                  placeholder="Enter system instructions for the AI..."
+                  value={chatbotConfig.systemPrompt}
+                  onChange={(e) => setChatbotConfig({ ...chatbotConfig, systemPrompt: e.target.value })}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-4 px-4 text-sm focus:outline-none focus:border-indigo-500 transition-all resize-none font-mono"
+                />
+              </div>
+              <p className="text-[10px] text-zinc-500 italic px-1">
+                Tip: Define the bot's personality, knowledge base, and specific rules here.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Save className="w-5 h-5" /> Save Chatbot Settings</>}
           </button>
         </motion.div>
 

@@ -9,6 +9,7 @@ import { Play, Lock, Crown, Info, List, Star, Share2, Plus, X, Globe, CreditCard
 import { cn } from '../lib/utils';
 import { toast } from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
+import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
 
 interface CurrencyInfo {
   code: string;
@@ -131,7 +132,7 @@ export const AnimeDetails: React.FC = () => {
       setEpisodes(epList.sort((a, b) => (a.order || 0) - (b.order || 0)));
       setLoading(false);
     }, (error: any) => {
-      console.error("Firestore Error (Episodes):", error);
+      handleFirestoreError(error, OperationType.LIST, `anime/${id}/episodes`);
       if (error.code === 'resource-exhausted') {
         toast.error("Database quota exceeded. Please try again tomorrow.");
       }
@@ -159,7 +160,7 @@ export const AnimeDetails: React.FC = () => {
         setIsLiked(snapshot.docs.some(doc => doc.id === userData.uid));
       }
     }, (error: any) => {
-      console.error("Likes Snapshot Error:", error);
+      handleFirestoreError(error, OperationType.LIST, `anime/${id}/episodes/${selectedEpisode.id}/likes`);
       if (error.code === 'resource-exhausted') {
         toast.error("Database quota exceeded. Please try again tomorrow.");
       }
@@ -173,7 +174,7 @@ export const AnimeDetails: React.FC = () => {
     const unsubComments = onSnapshot(commentsQuery, (snapshot) => {
       setComments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (error: any) => {
-      console.error("Comments Snapshot Error:", error);
+      handleFirestoreError(error, OperationType.LIST, `anime/${id}/episodes/${selectedEpisode.id}/comments`);
       if (error.code === 'resource-exhausted') {
         toast.error("Database quota exceeded. Please try again tomorrow.");
       }

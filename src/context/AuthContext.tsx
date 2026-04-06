@@ -4,6 +4,7 @@ import { doc, onSnapshot, getDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/firebase';
 import { isSubscriptionExpired } from '../lib/subscriptionUtils';
 import { toast } from 'react-hot-toast';
+import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
 
 interface UserData {
   uid: string;
@@ -97,7 +98,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }, (error: any) => {
           // Only log if it's not a permission error during logout/cleanup
           if (auth.currentUser) {
-            console.error("Firestore Error in AuthContext:", error);
+            handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
             if (error.code === 'resource-exhausted') {
               toast.error("Database quota exceeded. Please try again tomorrow.");
             }

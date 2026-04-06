@@ -1,28 +1,37 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { collection, query, getDocs, limit, orderBy } from 'firebase/firestore';
+import { collection, query, getDocs, limit, doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
 import { useNavigate } from 'react-router-dom';
 import { MessageSquare, Send, X, Bot, User, Loader2, Sparkles, Play, Search, List } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
-
-import { chatWithAI, ChatMessage } from '../services/aiService';
 import { usePlans } from '../hooks/usePlans';
+import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
+
+interface ChatbotConfig {
+  enabled: boolean;
+  botName: string;
+  systemPrompt: string;
+}
+
+interface ChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string | any[];
+}
 
 interface Message {
   role: 'user' | 'bot';
   content: React.ReactNode;
 }
 
+const AI_API_URL = "https://dewyfiyiqdveqaockzfn.supabase.co/functions/v1/api";
+const DEFAULT_MODEL = "google/gemini-2.5-flash-lite";
+
 export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const navigate = useNavigate();
   const { plans, paymentMethods, loading: plansLoading } = usePlans();
-  const [messages, setMessages] = useState<Message[]>([
-    { 
-      role: 'bot', 
-      content: 'Assalamu alaikum! I am your SahidAnime AI Assistant. How can I help you today?' 
-    }
-  ]);
+  const [config, setConfig] = useState<ChatbotConfig | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -31,32 +40,85 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [aiHistory, setAiHistory] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
-    if (!plansLoading) {
+    const unsub = onSnapshot(doc(db, 'settings', 'chatbot'), (doc) => {
+      if (doc.exists()) {
+        const data = doc.data() as ChatbotConfig;
+        setConfig(data);
+        if (messages.length === 0) {
+          setMessages([{ 
+            role: 'bot', 
+            content: `Assalamu alaikum! I am your ${data.botName}. How can I help you today?` 
+          }]);
+        }
+      } else {
+        // Fallback if no config exists
+        const fallbackName = 'SahidAnime Assistant';
+        setConfig({
+          enabled: true,
+          botName: fallbackName,
+          systemPrompt: 'You are a helpful assistant for SahidAnime.'
+        });
+        if (messages.length === 0) {
+          setMessages([{ 
+            role: 'bot', 
+            content: `Assalamu alaikum! I am your ${fallbackName}. How can I help you today?` 
+          }]);
+        }
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'settings/chatbot');
+    });
+    return () => unsub();
+  }, []);
+
+  const chatWithAI = async (messages: ChatMessage[]) => {
+    const apiKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    if (!apiKey) {
+      throw new Error('AI Service is not configured.');
+    }
+
+    const response = await fetch(AI_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": apiKey
+      },
+      body: JSON.stringify({
+        "model": DEFAULT_MODEL,
+        "messages": messages.map(m => ({
+          role: m.role === 'assistant' ? 'assistant' : m.role,
+          content: m.content
+        }))
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`API Error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (data.choices && data.choices[0]?.message?.content) {
+      return data.choices[0].message.content;
+    }
+    return data.content || data.text || (typeof data === 'string' ? data : JSON.stringify(data));
+  };
+
+  useEffect(() => {
+    if (!plansLoading && config) {
       setAiHistory([
         {
           role: 'system',
           content: `
-            You are SahidAnime AI Assistant. You are helpful, polite, and knowledgeable about the SahidAnime website.
-            Website Details:
-            - Name: SahidAnime
-            - Purpose: Anime streaming platform.
+            ${config.systemPrompt}
+            
+            Current Dynamic Data:
             - Plans: ${JSON.stringify(plans)}
             - Payment Methods: ${JSON.stringify(paymentMethods)}
-            - Social Media: WhatsApp (https://whatsapp.com/channel/0029Vahd4QT9Gv7M1esnDz46), Facebook (https://www.facebook.com/SahidAnime4u), Telegram (https://t.me/BTTH_HindiDub).
-            - Special Content: BTTH (Battle Through The Heavens) is a popular series here. Episode 189 and some others are paid content.
-            
-            Capabilities:
-            - You can help users find anime.
-            - You can explain subscription plans.
-            - You can guide users on how to pay and get access.
-            - You should encourage users to join the WhatsApp channel and watch the QNA video (https://youtu.be/Ib5Hoi2r598).
-            
-            Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).
           `
         }
       ]);
     }
-  }, [plans, paymentMethods, plansLoading]);
+  }, [plans, paymentMethods, plansLoading, config]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -126,7 +188,7 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             <Bot className="w-6 h-6 text-blue-500" />
           </div>
           <div>
-            <h3 className="font-black text-sm tracking-tight">SahidAnime Assistant</h3>
+            <h3 className="font-black text-sm tracking-tight">{config?.botName || 'SahidAnime Assistant'}</h3>
             <div className="flex items-center gap-1.5">
               <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
               <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Database Linked</span>

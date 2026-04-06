@@ -27,6 +27,8 @@ import { PrivacyPolicy } from './pages/policies/PrivacyPolicy';
 import { TermsConditions } from './pages/policies/TermsConditions';
 import { RefundPolicy } from './pages/policies/RefundPolicy';
 
+import { FloatingSupport } from './components/FloatingSupport';
+
 export default function App() {
   return (
     <AuthProvider>
@@ -44,6 +46,7 @@ export default function App() {
               },
             }}
           />
+          <FloatingSupport />
           <Routes>
             <Route path="/login" element={<Login />} />
             

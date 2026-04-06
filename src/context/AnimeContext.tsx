@@ -3,6 +3,7 @@ import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
 import { useAuth } from './AuthContext';
 import { toast } from 'react-hot-toast';
+import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
 
 interface Anime {
   id: string;
@@ -47,7 +48,7 @@ export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }));
       setLoading(false);
     }, (error: any) => {
-      console.error("Firestore Error (Anime):", error);
+      handleFirestoreError(error, OperationType.LIST, 'anime');
       if (error.code === 'resource-exhausted') {
         toast.error("Database quota exceeded. Please try again tomorrow.");
       }

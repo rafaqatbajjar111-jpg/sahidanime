@@ -6,6 +6,7 @@ import { Bell, X, Check, Info, AlertCircle, Trash2, Sparkles } from 'lucide-reac
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
 import { formatDistanceToNow } from 'date-fns';
+import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
 
 interface Notification {
   id: string;
@@ -37,6 +38,9 @@ export const NotificationPanel: React.FC<{ onClose: () => void }> = ({ onClose }
         ...doc.data()
       })) as Notification[];
       setNotifications(docs);
+      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'notifications');
       setLoading(false);
     });
 
