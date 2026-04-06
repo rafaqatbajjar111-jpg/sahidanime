@@ -1,0 +1,187 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and subscription data",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "subscription_plan": { "type": "string" },
+        "subscription_status": { "type": "string", "enum": ["active", "pending", "rejected", "none"] },
+        "country": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Anime": {
+      "title": "Anime",
+      "description": "Anime series details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "genre": { "type": "string" },
+        "posterUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "description", "posterUrl"]
+    },
+    "Episode": {
+      "title": "Episode",
+      "description": "Individual anime episodes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "animeId": { "type": "string" },
+        "title": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "accessType": { "type": "string", "enum": ["free", "premium", "locked"] },
+        "order": { "type": "number" }
+      },
+      "required": ["animeId", "title", "videoUrl", "accessType"]
+    },
+    "Plan": {
+      "title": "Plan",
+      "description": "Subscription plans",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "duration": { "type": "string" },
+        "benefits": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name", "price", "duration"]
+    },
+    "PurchaseRequest": {
+      "title": "PurchaseRequest",
+      "description": "User requests for premium plans",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "planId": { "type": "string" },
+        "planName": { "type": "string" },
+        "amount": { "type": "string" },
+        "currency": { "type": "string" },
+        "country": { "type": "string" },
+        "transactionId": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "planId", "status", "transactionId"]
+    },
+    "RedeemCode": {
+      "title": "RedeemCode",
+      "description": "Codes that users can redeem for subscriptions",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "planId": { "type": "string" },
+        "planName": { "type": "string" },
+        "maxUses": { "type": "number" },
+        "usedCount": { "type": "number" },
+        "usedBy": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "planId", "maxUses", "usedCount"]
+    },
+    "SupportLinks": {
+      "title": "SupportLinks",
+      "description": "Links for Telegram and WhatsApp support",
+      "type": "object",
+      "properties": {
+        "telegram": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "Like": {
+      "title": "Like",
+      "description": "User like on an episode",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "User comment on an episode",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userPhoto": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "userName", "text"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notifications for subscription status and updates",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["info", "success", "error", "update"] },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "message", "type", "read"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/anime/{animeId}": {
+      "schema": "Anime",
+      "description": "Anime series"
+    },
+    "/anime/{animeId}/episodes/{episodeId}": {
+      "schema": "Episode",
+      "description": "Episodes for a specific anime"
+    },
+    "/anime/{animeId}/episodes/{episodeId}/likes/{userId}": {
+      "schema": "Like",
+      "description": "Likes for a specific episode"
+    },
+    "/anime/{animeId}/episodes/{episodeId}/comments/{commentId}": {
+      "schema": "Comment",
+      "description": "Comments for a specific episode"
+    },
+    "/plans/{planId}": {
+      "schema": "Plan",
+      "description": "Available subscription plans"
+    },
+    "/purchaseRequests/{requestId}": {
+      "schema": "PurchaseRequest",
+      "description": "User purchase requests"
+    },
+    "/redeemCodes/{codeId}": {
+      "schema": "RedeemCode",
+      "description": "Redeemable subscription codes"
+    },
+    "/settings/{settingId}": {
+      "schema": "SupportLinks",
+      "description": "Platform settings (telegram, support, etc.)"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User notifications"
+    }
+  }
+}

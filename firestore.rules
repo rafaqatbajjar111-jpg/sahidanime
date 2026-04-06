@@ -1,0 +1,146 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields: uid, name, email, role, subscription_plan, subscription_status, country, createdAt
+    //
+    // Collection: anime
+    // Fields: title, description, genre, posterUrl, createdAt
+    //
+    // Collection: anime/{animeId}/episodes
+    // Fields: animeId, title, videoUrl, accessType, order
+    //
+    // Collection: plans
+    // Fields: name, price, duration, benefits
+    //
+    // Collection: purchaseRequests
+    // Fields: userId, userName, planId, planName, status, createdAt
+    //
+    // Collection: redeemCodes
+    // Fields: code, planId, planName, maxUses, usedCount, usedBy, createdAt
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.email in ["rkkhatab872@gmail.com", "mrkhatab112@gmail.com", "admin@rex.com"] ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'country']) &&
+             data.role in ['user', 'admin'] &&
+             data.subscription_status in ['active', 'pending', 'rejected', 'none'];
+    }
+
+    // Rules
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if (isAuthenticated() && request.auth.uid == userId && isValidUser(request.resource.data)) || isAdmin();
+      allow update: if isAdmin() || (
+        isOwner(userId) && 
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.uid == resource.data.uid &&
+        (
+          // Allow owner to update subscription if using a coupon or AI auto-approval
+          ((request.resource.data.get('subscription_method', '') == 'coupon' || request.resource.data.get('subscription_method', '') == 'ai_auto') && 
+           request.resource.data.get('subscription_status', '') == 'active' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['subscription_plan', 'subscription_status', 'subscription_method', 'subscription_updated_at'])) ||
+          // Otherwise, subscription fields must remain unchanged
+          (request.resource.data.get('subscription_status', '') == resource.data.get('subscription_status', '') &&
+           request.resource.data.get('subscription_plan', '') == resource.data.get('subscription_plan', ''))
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /anime/{animeId} {
+      allow read: if true;
+      allow write: if isAdmin();
+      
+      match /episodes/{episodeId} {
+        allow read: if true;
+        allow write: if isAdmin();
+
+        match /likes/{userId} {
+          allow read: if true;
+          allow write: if isAuthenticated() && request.auth.uid == userId;
+        }
+
+        match /comments/{commentId} {
+          allow read: if true;
+          allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+          allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+        }
+      }
+    }
+
+    match /plans/{planId} {
+      allow read: if true; // Everyone can see plans
+      allow write: if isAdmin();
+    }
+
+    match /paymentMethods/{methodId} {
+      allow read: if true; // Everyone can see payment methods
+      allow write: if isAdmin();
+    }
+
+    match /purchaseRequests/{requestId} {
+      allow read: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.userId);
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin();
+    }
+
+    match /settings/support {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /settings/telegram {
+      allow read, write: if isAdmin();
+    }
+
+    match /test/{docId} {
+      allow read: if true; // For connection testing
+    }
+
+    match /redeemCodes/{codeId} {
+      allow get: if isAuthenticated();
+      allow list: if isAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (
+        isAuthenticated() && 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount', 'usedBy']) &&
+        request.resource.data.usedCount == resource.data.usedCount + 1 &&
+        request.resource.data.usedBy.size() == resource.data.usedBy.size() + 1 &&
+        request.resource.data.usedBy.hasAll(resource.data.usedBy) &&
+        request.auth.uid in request.resource.data.usedBy &&
+        !(request.auth.uid in resource.data.usedBy) &&
+        request.resource.data.usedCount <= resource.data.maxUses
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && request.auth.uid == resource.data.userId;
+      allow create: if isAdmin();
+      allow update: if isAuthenticated() && request.auth.uid == resource.data.userId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+  }
+}
