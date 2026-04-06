@@ -84,10 +84,11 @@ export const NotificationPanel: React.FC<{ onClose: () => void }> = ({ onClose }
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 20, scale: 0.95 }}
-      className="fixed md:absolute inset-0 md:inset-auto md:top-16 md:right-0 w-full md:w-96 h-full md:h-auto md:max-h-[80vh] bg-zinc-950 md:bg-zinc-900 border-0 md:border md:border-zinc-800 rounded-none md:rounded-3xl shadow-2xl overflow-hidden z-50 flex flex-col"
+      initial={{ opacity: 0, x: '100%' }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: '100%' }}
+      transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+      className="fixed inset-0 md:left-auto md:w-[450px] bg-zinc-950 border-0 md:border-l md:border-zinc-800 shadow-2xl overflow-hidden z-[100] flex flex-col"
     >
       <div className="p-4 md:p-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/50 backdrop-blur-xl sticky top-0 z-10">
         <div className="flex items-center gap-2">

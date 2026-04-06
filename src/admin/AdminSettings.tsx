@@ -20,12 +20,15 @@ import {
   AlertTriangle,
   ArrowRight,
   Eye,
-  EyeOff
+  EyeOff,
+  Megaphone,
+  Plus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
+import { collection, addDoc } from 'firebase/firestore';
 
 interface TelegramConfig {
   botToken: string;
@@ -87,6 +90,15 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
     name: ''
   });
 
+  // Global Notification State
+  const [notifData, setNotifData] = useState({
+    userId: '',
+    title: '',
+    message: '',
+    type: 'info' as 'info' | 'success' | 'error' | 'update'
+  });
+  const [sendingNotif, setSendingNotif] = useState(false);
+
   useEffect(() => {
     const isAdmin = userData?.role === 'admin';
     if (!isAdmin) return;
@@ -120,6 +132,28 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
 
     fetchConfig();
   }, [user, userData]);
+
+  const handleSendNotification = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!notifData.userId || !notifData.title || !notifData.message) {
+      return toast.error("Please fill in all notification fields");
+    }
+
+    setSendingNotif(true);
+    try {
+      await addDoc(collection(db, 'notifications'), {
+        ...notifData,
+        read: false,
+        createdAt: serverTimestamp()
+      });
+      toast.success("Notification sent successfully!");
+      setNotifData({ userId: '', title: '', message: '', type: 'info' });
+    } catch (error: any) {
+      toast.error(`Failed to send notification: ${error.message}`);
+    } finally {
+      setSendingNotif(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -251,6 +285,94 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
       </div>
 
       <div className="grid gap-8">
+        {/* Global Notifications Card */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-zinc-900/50 border border-zinc-800 rounded-[2.5rem] p-8 space-y-8"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center">
+              <Megaphone className="w-6 h-6 text-blue-500" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold">Send Notification</h2>
+              <p className="text-sm text-zinc-500">Send a direct message to a user's notification panel</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSendNotification} className="space-y-6">
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-widest text-zinc-500 ml-1">Target User UID</label>
+                <div className="relative group">
+                  <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:text-blue-500 transition-colors" />
+                  <input 
+                    type="text"
+                    required
+                    placeholder="User UID (from Users tab)"
+                    value={notifData.userId}
+                    onChange={(e) => setNotifData({ ...notifData, userId: e.target.value })}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-blue-500 transition-all"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-widest text-zinc-500 ml-1">Notification Type</label>
+                <select
+                  value={notifData.type}
+                  onChange={(e) => setNotifData({ ...notifData, type: e.target.value as any })}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 px-4 text-sm focus:outline-none focus:border-blue-500 transition-all appearance-none cursor-pointer"
+                >
+                  <option value="info">Information (Gray)</option>
+                  <option value="success">Success (Green)</option>
+                  <option value="update">Update (Blue)</option>
+                  <option value="error">Alert (Red)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-black uppercase tracking-widest text-zinc-500 ml-1">Title</label>
+              <input 
+                type="text"
+                required
+                placeholder="e.g. Premium Activated!"
+                value={notifData.title}
+                onChange={(e) => setNotifData({ ...notifData, title: e.target.value })}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 px-4 text-sm focus:outline-none focus:border-blue-500 transition-all"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-black uppercase tracking-widest text-zinc-500 ml-1">Message</label>
+              <textarea 
+                rows={3}
+                required
+                placeholder="Enter the notification message..."
+                value={notifData.message}
+                onChange={(e) => setNotifData({ ...notifData, message: e.target.value })}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 px-4 text-sm focus:outline-none focus:border-blue-500 transition-all resize-none"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={sendingNotif}
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 shadow-xl shadow-blue-600/20"
+            >
+              {sendingNotif ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <>
+                  <Plus className="w-5 h-5" />
+                  Send Notification
+                </>
+              )}
+            </button>
+          </form>
+        </motion.div>
+
         {/* Telegram Integration Card */}
         <motion.div 
           initial={{ opacity: 0, y: 20 }}

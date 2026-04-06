@@ -60,7 +60,7 @@ service cloud.firestore {
           // Allow owner to update subscription if using a coupon or AI auto-approval
           ((request.resource.data.get('subscription_method', '') == 'coupon' || request.resource.data.get('subscription_method', '') == 'ai_auto') && 
            request.resource.data.get('subscription_status', '') == 'active' &&
-           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['subscription_plan', 'subscription_status', 'subscription_method', 'subscription_updated_at'])) ||
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['subscription_plan', 'subscription_status', 'subscription_method', 'subscription_updated_at', 'subscription_expiry'])) ||
           // Otherwise, subscription fields must remain unchanged
           (request.resource.data.get('subscription_status', '') == resource.data.get('subscription_status', '') &&
            request.resource.data.get('subscription_plan', '') == resource.data.get('subscription_plan', ''))
