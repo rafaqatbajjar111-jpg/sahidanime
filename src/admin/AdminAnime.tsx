@@ -6,7 +6,6 @@ import { useAnime } from '../context/AnimeContext';
 import { Plus, Trash2, Edit2, Upload, Loader2, Film, ListPlus, X, Check, ChevronRight } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { cn, formatDailymotionUrl } from '../lib/utils';
-import { notifyAllUsers } from '../services/notificationService';
 
 export const AdminAnime: React.FC = () => {
   const { animes } = useAnime();
@@ -64,12 +63,6 @@ export const AdminAnime: React.FC = () => {
           createdAt: serverTimestamp()
         });
         toast.success('Anime added successfully!');
-        // Notify all users about new content
-        await notifyAllUsers(
-          'New Anime Added! 🎬',
-          `${formData.title} is now available on SahidAnime. Start watching now!`,
-          'update'
-        );
       }
 
       setShowAddModal(false);

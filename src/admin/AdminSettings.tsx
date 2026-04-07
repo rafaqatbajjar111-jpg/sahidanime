@@ -21,8 +21,9 @@ import {
   ArrowRight,
   Eye,
   EyeOff,
-  Megaphone,
-  Plus
+  Plus,
+  Trash2,
+  Bot
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
@@ -46,6 +47,15 @@ interface ChatbotConfig {
   enabled: boolean;
   botName: string;
   systemPrompt: string;
+}
+
+interface PaymentProvider {
+  id: string;
+  name: string;
+  recipientName: string;
+  upiId: string;
+  currency: string;
+  enabled: boolean;
 }
 
 export const AdminSettings: React.FC = () => {
@@ -78,6 +88,7 @@ Capabilities:
 
 Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
   });
+  const [paymentProviders, setPaymentProviders] = useState<PaymentProvider[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -89,15 +100,6 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
     password: '',
     name: ''
   });
-
-  // Global Notification State
-  const [notifData, setNotifData] = useState({
-    userId: '',
-    title: '',
-    message: '',
-    type: 'info' as 'info' | 'success' | 'error' | 'update'
-  });
-  const [sendingNotif, setSendingNotif] = useState(false);
 
   useEffect(() => {
     const isAdmin = userData?.role === 'admin';
@@ -122,6 +124,12 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
         if (chatbotSnap.exists()) {
           setChatbotConfig(chatbotSnap.data() as ChatbotConfig);
         }
+
+        const paymentRef = doc(db, 'settings', 'payments');
+        const paymentSnap = await getDoc(paymentRef);
+        if (paymentSnap.exists()) {
+          setPaymentProviders(paymentSnap.data().providers || []);
+        }
       } catch (error) {
         console.error("Error fetching config:", error);
         toast.error("Failed to load settings");
@@ -133,34 +141,13 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
     fetchConfig();
   }, [user, userData]);
 
-  const handleSendNotification = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!notifData.userId || !notifData.title || !notifData.message) {
-      return toast.error("Please fill in all notification fields");
-    }
-
-    setSendingNotif(true);
-    try {
-      await addDoc(collection(db, 'notifications'), {
-        ...notifData,
-        read: false,
-        createdAt: serverTimestamp()
-      });
-      toast.success("Notification sent successfully!");
-      setNotifData({ userId: '', title: '', message: '', type: 'info' });
-    } catch (error: any) {
-      toast.error(`Failed to send notification: ${error.message}`);
-    } finally {
-      setSendingNotif(false);
-    }
-  };
-
   const handleSave = async () => {
     setSaving(true);
     try {
       await setDoc(doc(db, 'settings', 'telegram'), config);
       await setDoc(doc(db, 'settings', 'support'), supportConfig);
       await setDoc(doc(db, 'settings', 'chatbot'), chatbotConfig);
+      await setDoc(doc(db, 'settings', 'payments'), { providers: paymentProviders });
       toast.success("Settings saved successfully");
     } catch (error) {
       console.error("Error saving config:", error);
@@ -269,6 +256,26 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
     }
   };
 
+  const addPaymentProvider = () => {
+    const newProvider: PaymentProvider = {
+      id: Date.now().toString(),
+      name: 'New Provider',
+      recipientName: 'SK HAMJA',
+      upiId: 'example@upi',
+      currency: 'INR',
+      enabled: true
+    };
+    setPaymentProviders([...paymentProviders, newProvider]);
+  };
+
+  const updatePaymentProvider = (id: string, updates: Partial<PaymentProvider>) => {
+    setPaymentProviders(paymentProviders.map(p => p.id === id ? { ...p, ...updates } : p));
+  };
+
+  const removePaymentProvider = (id: string) => {
+    setPaymentProviders(paymentProviders.filter(p => p.id !== id));
+  };
+
   if (loading) {
     return (
       <div className="min-h-[400px] flex items-center justify-center">
@@ -281,98 +288,10 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
     <div className="max-w-4xl mx-auto space-y-8 py-6">
       <div className="space-y-1">
         <h1 className="text-3xl font-black tracking-tight">Platform Settings</h1>
-        <p className="text-zinc-500">Configure notifications and system integrations</p>
+        <p className="text-zinc-500">Configure system integrations</p>
       </div>
 
       <div className="grid gap-8">
-        {/* Global Notifications Card */}
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-zinc-900/50 border border-zinc-800 rounded-[2.5rem] p-8 space-y-8"
-        >
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center">
-              <Megaphone className="w-6 h-6 text-blue-500" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold">Send Notification</h2>
-              <p className="text-sm text-zinc-500">Send a direct message to a user's notification panel</p>
-            </div>
-          </div>
-
-          <form onSubmit={handleSendNotification} className="space-y-6">
-            <div className="grid md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-xs font-black uppercase tracking-widest text-zinc-500 ml-1">Target User UID</label>
-                <div className="relative group">
-                  <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:text-blue-500 transition-colors" />
-                  <input 
-                    type="text"
-                    required
-                    placeholder="User UID (from Users tab)"
-                    value={notifData.userId}
-                    onChange={(e) => setNotifData({ ...notifData, userId: e.target.value })}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-blue-500 transition-all"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs font-black uppercase tracking-widest text-zinc-500 ml-1">Notification Type</label>
-                <select
-                  value={notifData.type}
-                  onChange={(e) => setNotifData({ ...notifData, type: e.target.value as any })}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 px-4 text-sm focus:outline-none focus:border-blue-500 transition-all appearance-none cursor-pointer"
-                >
-                  <option value="info">Information (Gray)</option>
-                  <option value="success">Success (Green)</option>
-                  <option value="update">Update (Blue)</option>
-                  <option value="error">Alert (Red)</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-widest text-zinc-500 ml-1">Title</label>
-              <input 
-                type="text"
-                required
-                placeholder="e.g. Premium Activated!"
-                value={notifData.title}
-                onChange={(e) => setNotifData({ ...notifData, title: e.target.value })}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 px-4 text-sm focus:outline-none focus:border-blue-500 transition-all"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-widest text-zinc-500 ml-1">Message</label>
-              <textarea 
-                rows={3}
-                required
-                placeholder="Enter the notification message..."
-                value={notifData.message}
-                onChange={(e) => setNotifData({ ...notifData, message: e.target.value })}
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 px-4 text-sm focus:outline-none focus:border-blue-500 transition-all resize-none"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={sendingNotif}
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50 shadow-xl shadow-blue-600/20"
-            >
-              {sendingNotif ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <>
-                  <Plus className="w-5 h-5" />
-                  Send Notification
-                </>
-              )}
-            </button>
-          </form>
-        </motion.div>
-
         {/* Telegram Integration Card */}
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
@@ -457,6 +376,115 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
               {testing ? <Loader2 className="w-5 h-5 animate-spin" /> : <><CheckCircle2 className="w-5 h-5" /> Test Connection</>}
             </button>
           </div>
+        </motion.div>
+
+        {/* Payment Providers Card */}
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.09 }}
+          className="bg-zinc-900/50 border border-zinc-800 rounded-[2.5rem] p-8 space-y-8"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-amber-500/10 rounded-2xl flex items-center justify-center">
+                <Shield className="w-6 h-6 text-amber-500" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold">Payment Providers</h2>
+                <p className="text-sm text-zinc-500">Manage UPI IDs and payment recipients</p>
+              </div>
+            </div>
+            <button
+              onClick={addPaymentProvider}
+              className="px-4 py-2 bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-white text-xs font-black rounded-xl transition-all flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Add Provider
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            {paymentProviders.map((provider) => (
+              <div key={provider.id} className="bg-zinc-950 border border-zinc-800 rounded-2xl p-6 space-y-4">
+                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">Provider Name</label>
+                    <input 
+                      type="text"
+                      value={provider.name}
+                      onChange={(e) => updatePaymentProvider(provider.id, { name: e.target.value })}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-2 px-3 text-sm focus:outline-none focus:border-amber-500 transition-all"
+                      placeholder="e.g. Google Pay"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">Recipient Name</label>
+                    <input 
+                      type="text"
+                      value={provider.recipientName}
+                      onChange={(e) => updatePaymentProvider(provider.id, { recipientName: e.target.value })}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-2 px-3 text-sm focus:outline-none focus:border-amber-500 transition-all"
+                      placeholder="e.g. SK HAMJA"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">UPI ID / Account</label>
+                    <input 
+                      type="text"
+                      value={provider.upiId}
+                      onChange={(e) => updatePaymentProvider(provider.id, { upiId: e.target.value })}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-2 px-3 text-sm focus:outline-none focus:border-amber-500 transition-all"
+                      placeholder="example@upi"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500 ml-1">Currency</label>
+                    <select
+                      value={provider.currency}
+                      onChange={(e) => updatePaymentProvider(provider.id, { currency: e.target.value })}
+                      className="w-full bg-zinc-900 border border-zinc-800 rounded-xl py-2 px-3 text-sm focus:outline-none focus:border-amber-500 transition-all"
+                    >
+                      <option value="INR">INR (â‚¹)</option>
+                      <option value="USD">USD ($)</option>
+                      <option value="PKR">PKR (Rs)</option>
+                      <option value="BDT">BDT (Tk)</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between pt-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="checkbox"
+                      checked={provider.enabled}
+                      onChange={(e) => updatePaymentProvider(provider.id, { enabled: e.target.checked })}
+                      className="w-4 h-4 rounded border-zinc-800 text-amber-500 focus:ring-amber-500 bg-zinc-900"
+                    />
+                    <span className="text-xs font-bold text-zinc-400">Enabled</span>
+                  </label>
+                  <button 
+                    onClick={() => removePaymentProvider(provider.id)}
+                    className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {paymentProviders.length === 0 && (
+              <div className="text-center py-8 border-2 border-dashed border-zinc-800 rounded-2xl">
+                <p className="text-sm text-zinc-500">No payment providers added yet.</p>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="w-full bg-amber-600 hover:bg-amber-500 text-white py-3 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Save className="w-5 h-5" /> Save Payment Settings</>}
+          </button>
         </motion.div>
 
         {/* Support Links Card */}

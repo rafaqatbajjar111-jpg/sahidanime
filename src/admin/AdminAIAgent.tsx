@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
-import { collection, addDoc, serverTimestamp, updateDoc, doc, query, orderBy, limit, getDocs } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, updateDoc, doc, query, orderBy, limit, getDocs, deleteDoc, where } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
-import { GoogleGenAI, Type } from "@google/genai";
-import { Bot, Send, Loader2, Sparkles, AlertCircle, CheckCircle2, ChevronDown, List, Trash2 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Bot, Send, Loader2, Sparkles, AlertCircle, CheckCircle2, ChevronDown, List, Trash2, Shield, Settings2 } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { cn, formatDailymotionUrl } from '../lib/utils';
 import { useTheme } from '../context/ThemeContext';
 import { useAnime } from '../context/AnimeContext';
+import { chatWithAI } from '../services/aiService';
 
 export const AdminAIAgent: React.FC = () => {
   const { theme } = useTheme();
@@ -52,90 +52,125 @@ export const AdminAIAgent: React.FC = () => {
     const lastEpNumber = await getLastEpisodeNumber(selectedAnimeId);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `I want to add multiple episodes to the anime "${selectedAnime?.title}". 
-        The last episode number currently in the database is ${lastEpNumber}.
-        
-        Parse the following text which contains one or many episode links. 
-        Extract a list of episodes. For each episode, identify:
-        1. Episode Number: If explicitly mentioned, use it. If not mentioned, assume sequential numbering starting from ${lastEpNumber + 1}.
-        2. Stream Link: The primary video URL.
-        3. Download Link: A secondary URL for downloading.
-        
-        CRITICAL INSTRUCTIONS:
-        - If the user provides a list of links without numbers, number them sequentially starting from ${lastEpNumber + 1}.
-        - If the user mentions a "global download link" or says "all episodes have this download link", apply that link to every episode that doesn't have its own specific download link.
-        - If the user provides links in pairs (Stream, Download), match them correctly.
-        
-        User Request: "${input}"`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              episodes: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    episodeNumber: { type: Type.NUMBER },
-                    streamUrl: { type: Type.STRING },
-                    downloadUrl: { type: Type.STRING },
-                    isPremium: { type: Type.BOOLEAN }
-                  },
-                  required: ["episodeNumber", "streamUrl"]
-                }
-              }
+      const prompt = `
+        You are an AI Admin Agent for SahidAnime. 
+        Target Anime: "${selectedAnime?.title}" (ID: ${selectedAnimeId}).
+        Last Episode Number: ${lastEpNumber}.
+
+        Analyze the following request and determine the action(s) to take.
+        Actions can be:
+        1. ADD: Add new episodes with stream/download links.
+        2. DELETE: Delete specific episodes by number or range.
+        3. UPDATE_ACCESS: Change access type (premium/free) for specific episodes.
+
+        User Request: "${input}"
+
+        Respond ONLY with a JSON object in this format:
+        {
+          "actions": [
+            {
+              "type": "ADD",
+              "episodes": [
+                { "episodeNumber": 1, "streamUrl": "...", "downloadUrl": "...", "isPremium": false }
+              ]
             },
-            required: ["episodes"]
-          }
+            {
+              "type": "DELETE",
+              "episodeNumbers": [1, 2, 3]
+            },
+            {
+              "type": "UPDATE_ACCESS",
+              "episodeNumbers": [1, 2],
+              "isPremium": true
+            }
+          ]
         }
-      });
 
-      const data = JSON.parse(response.text || '{"episodes": []}');
-      const episodesToAdd = data.episodes;
+        CRITICAL:
+        - If adding episodes without numbers, start from ${lastEpNumber + 1}.
+        - If the user says "make all episodes premium", use UPDATE_ACCESS for all existing episodes.
+        - If the user says "delete episode 5", use DELETE action.
+      `;
 
-      if (episodesToAdd.length === 0) {
-        setResult({ error: "No episodes found in your request. Please provide links and episode numbers." });
+      const aiResponse = await chatWithAI([
+        { role: 'system', content: 'You are a precise admin assistant. Return only JSON.' },
+        { role: 'user', content: prompt }
+      ]);
+
+      let data;
+      try {
+        // Clean the response if it contains markdown code blocks
+        const jsonStr = aiResponse.replace(/```json\n?|\n?```/g, '').trim();
+        data = JSON.parse(jsonStr);
+      } catch (e) {
+        throw new Error("AI returned invalid data format. Please try again.");
+      }
+
+      if (!data.actions || data.actions.length === 0) {
+        setResult({ error: "No clear actions identified. Please be more specific." });
         setLoading(false);
         return;
       }
 
-      setProgress({ current: 0, total: episodesToAdd.length });
+      let totalAdded = 0;
+      let totalDeleted = 0;
+      let totalUpdated = 0;
 
-      let addedCount = 0;
-      for (const ep of episodesToAdd) {
-        const epData = {
-          title: `Episode ${ep.episodeNumber}`,
-          videoUrl: formatDailymotionUrl(ep.streamUrl || ''),
-          downloadUrl: ep.downloadUrl || '',
-          accessType: ep.isPremium ? 'premium' : 'free',
-          order: ep.episodeNumber,
-          animeId: selectedAnimeId,
-          createdAt: serverTimestamp()
-        };
-
-        await addDoc(collection(db, 'anime', selectedAnimeId, 'episodes'), epData);
-        addedCount++;
-        setProgress(prev => ({ ...prev, current: addedCount }));
+      for (const action of data.actions) {
+        if (action.type === 'ADD' && action.episodes) {
+          setProgress({ current: 0, total: action.episodes.length });
+          for (const ep of action.episodes) {
+            const epData = {
+              title: `Episode ${ep.episodeNumber}`,
+              videoUrl: formatDailymotionUrl(ep.streamUrl || ''),
+              downloadUrl: ep.downloadUrl || '',
+              accessType: ep.isPremium ? 'premium' : 'free',
+              order: ep.episodeNumber,
+              animeId: selectedAnimeId,
+              createdAt: serverTimestamp()
+            };
+            await addDoc(collection(db, 'anime', selectedAnimeId, 'episodes'), epData);
+            totalAdded++;
+            setProgress(prev => ({ ...prev, current: totalAdded }));
+          }
+        } else if (action.type === 'DELETE' && action.episodeNumbers) {
+          for (const num of action.episodeNumbers) {
+            const q = query(collection(db, 'anime', selectedAnimeId, 'episodes'), where('order', '==', num));
+            const snapshot = await getDocs(q);
+            for (const docSnap of snapshot.docs) {
+              await deleteDoc(doc(db, 'anime', selectedAnimeId, 'episodes', docSnap.id));
+              totalDeleted++;
+            }
+          }
+        } else if (action.type === 'UPDATE_ACCESS' && action.episodeNumbers) {
+          for (const num of action.episodeNumbers) {
+            const q = query(collection(db, 'anime', selectedAnimeId, 'episodes'), where('order', '==', num));
+            const snapshot = await getDocs(q);
+            for (const docSnap of snapshot.docs) {
+              await updateDoc(doc(db, 'anime', selectedAnimeId, 'episodes', docSnap.id), {
+                accessType: action.isPremium ? 'premium' : 'free'
+              });
+              totalUpdated++;
+            }
+          }
+        }
       }
       
-      // Update anime's updatedAt
       await updateDoc(doc(db, 'anime', selectedAnimeId), { updatedAt: serverTimestamp() });
 
       setResult({ 
         success: true, 
         animeTitle: selectedAnime?.title,
-        count: addedCount
+        added: totalAdded,
+        deleted: totalDeleted,
+        updated: totalUpdated
       });
       setInput('');
-      toast.success(`Successfully added ${addedCount} episodes to ${selectedAnime?.title}!`);
+      toast.success(`AI Agent completed tasks for ${selectedAnime?.title}!`);
 
     } catch (error: any) {
       console.error("AI Agent Error:", error);
-      setResult({ error: "Failed to process request. Please try again with more details." });
+      setResult({ error: error.message || "Failed to process request." });
       toast.error("AI Agent failed to process.");
     } finally {
       setLoading(false);
@@ -245,7 +280,9 @@ export const AdminAIAgent: React.FC = () => {
                 {!result.error && (
                   <div className="text-sm space-y-1 opacity-80">
                     <p>Anime: <span className="font-black">{result.animeTitle}</span></p>
-                    <p>Episodes Added: <span className="font-black">{result.count}</span></p>
+                    {result.added > 0 && <p>Episodes Added: <span className="font-black">{result.added}</span></p>}
+                    {result.deleted > 0 && <p>Episodes Deleted: <span className="font-black">{result.deleted}</span></p>}
+                    {result.updated > 0 && <p>Episodes Updated: <span className="font-black">{result.updated}</span></p>}
                   </div>
                 )}
               </div>
@@ -265,8 +302,8 @@ export const AdminAIAgent: React.FC = () => {
           </h3>
           <ul className="text-xs text-zinc-500 space-y-2 list-disc ml-4">
             <li>Select the anime first from the dropdown.</li>
-            <li>You can paste hundreds of links at once.</li>
-            <li>Mention "Use this download link for all" to save time.</li>
+            <li>You can add, delete, or update episodes.</li>
+            <li>Example: "Delete episode 5" or "Make all episodes premium".</li>
             <li>AI will automatically match links to episode numbers.</li>
           </ul>
         </div>

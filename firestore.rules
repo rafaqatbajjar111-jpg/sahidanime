@@ -116,6 +116,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /settings/payments {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     match /settings/telegram {
       allow read, write: if isAdmin();
     }
@@ -139,13 +144,6 @@ service cloud.firestore {
         request.resource.data.usedCount <= resource.data.maxUses
       );
       allow delete: if isAdmin();
-    }
-
-    match /notifications/{notificationId} {
-      allow read: if isAuthenticated() && request.auth.uid == resource.data.userId;
-      allow create: if isAdmin();
-      allow update: if isAuthenticated() && request.auth.uid == resource.data.userId && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
-      allow delete: if isAuthenticated() && request.auth.uid == resource.data.userId;
     }
   }
 }

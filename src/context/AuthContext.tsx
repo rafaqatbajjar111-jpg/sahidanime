@@ -16,6 +16,14 @@ interface UserData {
   subscription_expiry?: any;
   subscription_updated_at?: any;
   country: string;
+  pending_payment?: {
+    planId: string;
+    paidAmount: number;
+    remainingAmount: number;
+    planName: string;
+    timestamp: string;
+  } | null;
+  photoURL?: string;
 }
 
 interface AuthContextType {

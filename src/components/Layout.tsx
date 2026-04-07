@@ -9,7 +9,6 @@ import {
   Menu, 
   X, 
   Search,
-  Bell,
   ChevronDown,
   Settings,
   ShieldCheck,
@@ -23,7 +22,6 @@ import { signOut } from 'firebase/auth';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sun, Moon, Ticket } from 'lucide-react';
-import { NotificationPanel } from './NotificationPanel';
 import { GlobalAds } from './GlobalAds';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
@@ -32,8 +30,6 @@ import { handleFirestoreError, OperationType } from '../firebase/firestoreError'
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [hasUnread, setHasUnread] = useState(false);
   const { user, userData } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
@@ -51,24 +47,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   ];
 
   const isAdminUser = user && userData?.role === 'admin';
-
-  React.useEffect(() => {
-    if (!user) {
-      setHasUnread(false);
-      return;
-    }
-    const q = query(
-      collection(db, 'notifications'),
-      where('userId', '==', user.uid),
-      where('read', '==', false)
-    );
-    const unsub = onSnapshot(q, (snapshot) => {
-      setHasUnread(!snapshot.empty);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'notifications');
-    });
-    return () => unsub();
-  }, [user]);
 
   if (isAdminUser) {
     navItems.push({ name: 'Admin Panel', icon: LayoutDashboard, path: '/admin' });
@@ -221,30 +199,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             >
               {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
-
-            <div className="relative">
-              <button 
-                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-                className={cn(
-                  "p-2.5 rounded-xl relative transition-all hover:scale-110 active:scale-95",
-                  theme === 'dark' ? "bg-zinc-900 text-zinc-400 hover:text-white" : "bg-zinc-100 text-zinc-500 hover:text-zinc-900"
-                )}
-              >
-                <Bell className="w-5 h-5" />
-                {hasUnread && (
-                  <span className="absolute top-2.5 right-2.5 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-white dark:border-zinc-900 animate-pulse" />
-                )}
-              </button>
-
-              <AnimatePresence>
-                {isNotificationsOpen && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setIsNotificationsOpen(false)} />
-                    <NotificationPanel onClose={() => setIsNotificationsOpen(false)} />
-                  </>
-                )}
-              </AnimatePresence>
-            </div>
 
             <div className="relative">
               <button 

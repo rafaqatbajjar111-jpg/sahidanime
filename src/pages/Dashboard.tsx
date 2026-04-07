@@ -55,6 +55,7 @@ export const Dashboard: React.FC = () => {
   }
 
   const featured = featuredAnimes[currentBannerIndex] || {
+    id: 'default',
     title: "Welcome to SahidAnime",
     description: "Discover the latest and greatest anime series here. High quality streaming, multiple servers, and fast downloads.",
     posterUrl: "https://picsum.photos/seed/anime-hero/1920/1080"

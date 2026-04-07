@@ -26,9 +26,19 @@ export interface PaymentMethod {
   instruction: string;
 }
 
+export interface PaymentProvider {
+  id: string;
+  name: string;
+  recipientName: string;
+  upiId: string;
+  currency: string;
+  enabled: boolean;
+}
+
 export const usePlans = () => {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<{ [key: string]: PaymentMethod }>({});
+  const [paymentProviders, setPaymentProviders] = useState<PaymentProvider[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -51,7 +61,7 @@ export const usePlans = () => {
       handleFirestoreError(error, OperationType.LIST, 'plans');
     });
 
-    // Listen for payment methods
+    // Listen for payment methods (Legacy/Default)
     const unsubMethods = onSnapshot(collection(db, 'paymentMethods'), (snapshot) => {
       if (snapshot.empty) {
         // Initialize with defaults if empty
@@ -69,15 +79,25 @@ export const usePlans = () => {
         });
         setPaymentMethods(methods);
       }
-      setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'paymentMethods');
+    });
+
+    // Listen for dynamic payment providers
+    const unsubProviders = onSnapshot(doc(db, 'settings', 'payments'), (snapshot) => {
+      if (snapshot.exists()) {
+        setPaymentProviders(snapshot.data().providers || []);
+      }
+      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'settings/payments');
       setLoading(false);
     });
 
     return () => {
       unsubPlans();
       unsubMethods();
+      unsubProviders();
     };
   }, []);
 
@@ -89,5 +109,9 @@ export const usePlans = () => {
     await setDoc(doc(db, 'paymentMethods', key), method);
   };
 
-  return { plans, paymentMethods, loading, updatePlan, updatePaymentMethod };
+  const updatePaymentProviders = async (providers: PaymentProvider[]) => {
+    await setDoc(doc(db, 'settings', 'payments'), { providers });
+  };
+
+  return { plans, paymentMethods, paymentProviders, loading, updatePlan, updatePaymentMethod, updatePaymentProviders };
 };

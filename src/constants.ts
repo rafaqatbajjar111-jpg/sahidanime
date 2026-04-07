@@ -40,9 +40,9 @@ export const PLANS = [
 export const PAYMENT_METHODS: any = {
   IN: {
     method: 'UPI',
-    details: '8343830288',
-    name: 'Sahid Anime 4 You/Sk Hamja',
-    instruction: 'Payment karke niche Transaction ID/UTR submit karein'
+    details: 'btthhindidubmasala@okicici',
+    name: 'Sahid Anime 4 You',
+    instruction: 'Payment karke screenshot upload karein'
   },
   PK: {
     method: 'EasyPaisa/JazzCash',

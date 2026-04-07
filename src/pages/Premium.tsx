@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { collection, addDoc, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, updateDoc, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
-import { Crown, Check, ShieldCheck, Zap, Star, Loader2, Globe, CreditCard, X, ArrowRight, Upload, Sparkles } from 'lucide-react';
+import { Crown, Check, ShieldCheck, Zap, Star, Loader2, Globe, CreditCard, X, ArrowRight, Upload, Sparkles, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -14,7 +14,7 @@ import { getSubscriptionExpiration } from '../lib/subscriptionUtils';
 
 export const Premium: React.FC = () => {
   const { userData, user } = useAuth();
-  const { plans, paymentMethods, loading: plansLoading } = usePlans();
+  const { plans, paymentMethods, paymentProviders, loading: plansLoading } = usePlans();
   const [countryCode, setCountryCode] = useState('IN');
   const [currency, setCurrency] = useState({ code: 'INR', symbol: '₹' });
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
@@ -76,14 +76,43 @@ export const Premium: React.FC = () => {
       const planPrice = selectedPlan.prices[countryCode] || selectedPlan.prices.DEFAULT;
       const planDetails = `Plan: ${selectedPlan.name}, Price: ${planPrice.symbol}${planPrice.amount}, Duration: ${planPrice.duration}`;
       
-      // AI Analysis
-      const aiResult = await analyzePaymentScreenshot(screenshot, planDetails);
+      // Get valid recipients from dynamic providers
+      const validRecipients = paymentProviders
+        .filter(p => p.enabled && p.currency === planPrice.currency)
+        .map(p => [p.recipientName, p.upiId])
+        .flat();
       
-      if (aiResult.includes('APPROVED')) {
+      // Add defaults just in case
+      validRecipients.push("Sahid Anime 4 You", "SK HAMJA", "btthhindidubmasala@okicici");
+
+      // 1. Duplicate Detection
+      const q = query(collection(db, 'purchaseRequests'), where('screenshot', '==', screenshot));
+      const duplicateSnapshot = await getDocs(q);
+      if (!duplicateSnapshot.empty) {
+        setVerificationStatus('fail');
+        setFailReason('This screenshot has already been used. Please provide a fresh payment proof.');
+        setAiStatus(null);
+        toast.error('Duplicate screenshot detected!');
+        return;
+      }
+
+      // 2. AI Analysis
+      const aiResponse = await analyzePaymentScreenshot(screenshot, planDetails, validRecipients);
+      let aiResult;
+      try {
+        const jsonStr = aiResponse.replace(/```json\n?|\n?```/g, '').trim();
+        aiResult = JSON.parse(jsonStr);
+      } catch (e) {
+        // Fallback for non-json responses
+        if (aiResponse.includes('APPROVED')) aiResult = { status: 'APPROVED' };
+        else if (aiResponse.includes('PARTIAL')) aiResult = { status: 'PARTIAL', reason: aiResponse };
+        else aiResult = { status: 'REJECTED', reason: aiResponse };
+      }
+      
+      if (aiResult.status === 'APPROVED') {
         setVerificationStatus('success');
         setAiStatus('Payment Verified! Activating your subscription...');
         
-        const planPrice = selectedPlan.prices[countryCode] || selectedPlan.prices.DEFAULT;
         const expirationDate = getSubscriptionExpiration(planPrice.duration as 'month' | 'year');
         
         // 1. Update User Subscription
@@ -92,7 +121,8 @@ export const Premium: React.FC = () => {
           subscription_status: 'active',
           subscription_updated_at: serverTimestamp(),
           subscription_expiry: expirationDate,
-          subscription_method: 'ai_auto'
+          subscription_method: 'ai_auto',
+          pending_payment: null // Clear any pending partial payments
         });
 
         // 2. Save Approved Request
@@ -103,26 +133,20 @@ export const Premium: React.FC = () => {
           planId: selectedPlan.id,
           planName: selectedPlan.name,
           amount: planPrice.amount.toString(),
+          paidAmount: aiResult.amount || planPrice.amount,
+          recipient: aiResult.recipient || 'SK HAMJA',
           currency: planPrice.currency,
           country: countryCode,
-          transactionId: 'AI_AUTO_APPROVED',
-          screenshot: screenshot,
+          transactionId: aiResult.utr || 'AI_AUTO_APPROVED',
+          utr: aiResult.utr || null,
+          battery: aiResult.battery || null,
+          screenshot: null, // DELETE PHOTO AS REQUESTED
           status: 'approved',
           createdAt: serverTimestamp()
         });
 
-        // 3. Create Notification
-        await addDoc(collection(db, 'notifications'), {
-          userId: user.uid,
-          title: 'Subscription Activated! 🎉',
-          message: `Congratulations! Your ${selectedPlan.name} plan is now active. Enjoy ad-free anime!`,
-          type: 'success',
-          read: false,
-          createdAt: serverTimestamp()
-        });
-
-        // 4. Telegram Notification
-        const telegramMessage = `🚀 *AI AUTO-APPROVED*\n\n✅ *User:* ${userData.name || 'Anonymous'}\n📧 *Email:* ${userData.email}\n📦 *Plan:* ${selectedPlan.name}\n💰 *Amount:* ${planPrice.symbol}${planPrice.amount}\n🌍 *Country:* ${countryCode}\n✨ *Status:* Activated by AI`;
+        // 3. Telegram Notification
+        const telegramMessage = `🚀 *AI AUTO-APPROVED*\n\n✅ *User:* ${userData.name || 'Anonymous'}\n📧 *Email:* ${userData.email}\n📦 *Plan:* ${selectedPlan.name}\n💰 *Amount:* ${planPrice.symbol}${planPrice.amount}\n🌍 *Country:* ${countryCode}\n✨ *Status:* Activated by AI\n🔋 *Battery:* ${aiResult.battery || 'N/A'}\n🆔 *UTR:* ${aiResult.utr || 'N/A'}\n👤 *Recipient:* ${aiResult.recipient || 'SK HAMJA'}`;
         await sendTelegramNotification(telegramMessage);
 
         toast.success('Payment Verified! Your subscription is now active.');
@@ -132,11 +156,58 @@ export const Premium: React.FC = () => {
           setSelectedPlan(null);
           setScreenshot(null);
         }, 3000);
+      } else if (aiResult.status === 'PARTIAL') {
+        const paid = Number(aiResult.amount) || 0;
+        const total = Number(planPrice.amount);
+        const remaining = total - paid;
+
+        setVerificationStatus('fail');
+        setFailReason(`Aapne ${paid} rupaye bheje hain. ${remaining} rupaye aur bhej kar activate karein.`);
+        setAiStatus(null);
+        toast.error(`Partial Payment: ${paid} received. ${remaining} remaining.`);
+
+        // Save Pending Payment in User Doc
+        await updateDoc(doc(db, 'users', user.uid), {
+          pending_payment: {
+            planId: selectedPlan.id,
+            paidAmount: paid,
+            remainingAmount: remaining,
+            planName: selectedPlan.name,
+            timestamp: new Date().toISOString()
+          }
+        });
+
+        // Save Partial Request
+        await addDoc(collection(db, 'purchaseRequests'), {
+          userId: user.uid,
+          userName: userData.name || 'Anonymous',
+          userEmail: userData.email,
+          planId: selectedPlan.id,
+          planName: selectedPlan.name,
+          amount: total.toString(),
+          paidAmount: paid,
+          remainingAmount: remaining,
+          recipient: aiResult.recipient || 'SK HAMJA',
+          currency: planPrice.currency,
+          country: countryCode,
+          transactionId: aiResult.utr || 'PARTIAL_PAYMENT',
+          utr: aiResult.utr || null,
+          battery: aiResult.battery || null,
+          screenshot: null, // DELETE PHOTO AS REQUESTED
+          status: 'partial',
+          aiReason: aiResult.reason,
+          createdAt: serverTimestamp()
+        });
+
+        // Telegram Notification
+        const telegramMessage = `⚠️ *AI PARTIAL PAYMENT*\n\n👤 *User:* ${userData.name || 'Anonymous'}\n💰 *Paid:* ${paid}\n📉 *Remaining:* ${remaining}\n📦 *Plan:* ${selectedPlan.name}\n👤 *Recipient:* ${aiResult.recipient || 'SK HAMJA'}`;
+        await sendTelegramNotification(telegramMessage);
+
       } else {
         setVerificationStatus('fail');
-        setFailReason(aiResult);
+        setFailReason(aiResult.reason || 'AI could not verify your payment.');
         setAiStatus(null);
-        toast.error(`AI Rejected Payment: ${aiResult}`);
+        toast.error(`AI Rejected Payment: ${aiResult.reason || 'Invalid screenshot'}`);
         
         // Save Rejected Request for Admin Review
         await addDoc(collection(db, 'purchaseRequests'), {
@@ -146,22 +217,16 @@ export const Premium: React.FC = () => {
           planId: selectedPlan.id,
           planName: selectedPlan.name,
           amount: planPrice.amount.toString(),
+          paidAmount: aiResult.amount || 0,
+          recipient: aiResult.recipient || 'N/A',
           currency: planPrice.currency,
           country: countryCode,
           transactionId: 'AI_REJECTED',
-          screenshot: screenshot,
+          utr: aiResult.utr || null,
+          battery: aiResult.battery || null,
+          screenshot: null, // DELETE PHOTO AS REQUESTED
           status: 'rejected',
-          aiReason: aiResult,
-          createdAt: serverTimestamp()
-        });
-
-        // Create Notification
-        await addDoc(collection(db, 'notifications'), {
-          userId: user.uid,
-          title: 'Verification Failed ❌',
-          message: `AI could not verify your payment. Reason: ${aiResult}. Please try again with a clear screenshot.`,
-          type: 'error',
-          read: false,
+          aiReason: aiResult.reason,
           createdAt: serverTimestamp()
         });
       }
@@ -203,6 +268,50 @@ export const Premium: React.FC = () => {
           Unlock the full potential of sahidanime. Ad-free, Ultra HD, and exclusive anime content.
         </p>
       </div>
+
+      {/* Pending Payment Alert */}
+      {userData?.pending_payment && (
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-zinc-900 border border-blue-500/30 p-6 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl shadow-blue-600/5"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-blue-600/20 rounded-2xl flex items-center justify-center shrink-0">
+              <AlertCircle className="w-6 h-6 text-blue-500" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-black text-white">Pending Payment Found!</h3>
+              <p className="text-xs text-zinc-400">
+                Aapne <span className="text-blue-500 font-bold">₹{userData.pending_payment.paidAmount}</span> pehle hi pay kar diye hain. 
+                Sirf <span className="text-green-500 font-bold">₹{userData.pending_payment.remainingAmount}</span> aur pay karke apna <span className="text-white font-bold">{userData.pending_payment.planName}</span> activate karein.
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={() => {
+              const plan = plans.find(p => p.id === userData.pending_payment.planId);
+              if (plan) {
+                // Override plan price for this session
+                const modifiedPlan = {
+                  ...plan,
+                  prices: {
+                    ...plan.prices,
+                    [countryCode]: {
+                      ...plan.prices[countryCode],
+                      amount: userData.pending_payment.remainingAmount
+                    }
+                  }
+                };
+                setSelectedPlan(modifiedPlan);
+              }
+            }}
+            className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-2xl transition-all active:scale-95 shadow-lg shadow-blue-600/20"
+          >
+            Complete Payment Now
+          </button>
+        </motion.div>
+      )}
 
       {/* Plans Grid */}
       <div className="grid md:grid-cols-3 gap-6 relative">
@@ -302,19 +411,44 @@ export const Premium: React.FC = () => {
 
             <div className="bg-zinc-50 border border-zinc-100 rounded-2xl p-6 space-y-5 relative z-10">
               {/* Payment Details at the Top */}
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <div className="flex items-center gap-2 text-blue-600 font-black text-[10px] uppercase tracking-wider">
                   <Zap className="w-3.5 h-3.5 fill-current" />
-                  {(paymentMethods[countryCode] || paymentMethods.DEFAULT)?.method} Details
+                  Available Payment Methods
                 </div>
-                <div className="p-4 bg-white rounded-xl border border-zinc-200 space-y-2 shadow-sm">
-                  <div className="text-lg font-black text-zinc-900 select-all text-center tracking-tight">
-                    {(paymentMethods[countryCode] || paymentMethods.DEFAULT)?.details}
-                  </div>
-                  <div className="text-center space-y-0.5">
-                    <p className="text-[10px] text-zinc-500 font-bold">Account: {(paymentMethods[countryCode] || paymentMethods.DEFAULT)?.name}</p>
-                    <p className="text-[9px] text-blue-600 italic">{(paymentMethods[countryCode] || paymentMethods.DEFAULT)?.instruction}</p>
-                  </div>
+                
+                <div className="space-y-3">
+                  {/* Dynamic Providers */}
+                  {paymentProviders
+                    .filter(p => p.enabled && p.currency === (selectedPlan.prices[countryCode] || selectedPlan.prices.DEFAULT).currency)
+                    .map((provider) => (
+                      <div key={provider.id} className="p-4 bg-white rounded-xl border border-zinc-200 space-y-2 shadow-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">{provider.name}</span>
+                          <span className="text-[10px] font-bold text-zinc-400">{provider.currency}</span>
+                        </div>
+                        <div className="text-lg font-black text-zinc-900 select-all text-center tracking-tight">
+                          {provider.upiId}
+                        </div>
+                        <div className="text-center">
+                          <p className="text-[10px] text-zinc-500 font-bold">Recipient: {provider.recipientName}</p>
+                        </div>
+                      </div>
+                    ))
+                  }
+
+                  {/* Fallback/Legacy Methods if no dynamic ones for this currency */}
+                  {paymentProviders.filter(p => p.enabled && p.currency === (selectedPlan.prices[countryCode] || selectedPlan.prices.DEFAULT).currency).length === 0 && (
+                    <div className="p-4 bg-white rounded-xl border border-zinc-200 space-y-2 shadow-sm">
+                      <div className="text-lg font-black text-zinc-900 select-all text-center tracking-tight">
+                        {(paymentMethods[countryCode] || paymentMethods.DEFAULT)?.details}
+                      </div>
+                      <div className="text-center space-y-0.5">
+                        <p className="text-[10px] text-zinc-500 font-bold">Account: {(paymentMethods[countryCode] || paymentMethods.DEFAULT)?.name}</p>
+                        <p className="text-[9px] text-blue-600 italic">{(paymentMethods[countryCode] || paymentMethods.DEFAULT)?.instruction}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

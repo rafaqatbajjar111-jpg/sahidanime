@@ -23,6 +23,7 @@ interface Episode {
   id: string;
   title: string;
   videoUrl: string;
+  downloadUrl?: string;
   accessType: 'free' | 'premium' | 'locked';
   order: number;
 }

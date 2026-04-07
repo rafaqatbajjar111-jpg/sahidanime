@@ -1,12 +1,20 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { collection, query, getDocs, limit, doc, onSnapshot } from 'firebase/firestore';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { collection, query, getDocs, limit, doc, onSnapshot, addDoc, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, Send, X, Bot, User, Loader2, Sparkles, Play, Search, List } from 'lucide-react';
+import { MessageSquare, Send, X, Bot, User, Loader2, Sparkles, Play, Search, List, ExternalLink, Image as ImageIcon, Upload, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { cn } from '../lib/utils';
 import { usePlans } from '../hooks/usePlans';
+import { useAuth } from '../context/AuthContext';
+import { useLocation } from 'react-router-dom';
 import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
+import { analyzePaymentScreenshot } from '../services/aiService';
+import { getSubscriptionExpiration } from '../lib/subscriptionUtils';
+import { toast } from 'react-hot-toast';
+import { chatWithAI, ChatMessage } from '../services/aiService';
 
 interface ChatbotConfig {
   enabled: boolean;
@@ -14,14 +22,9 @@ interface ChatbotConfig {
   systemPrompt: string;
 }
 
-interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string | any[];
-}
-
 interface Message {
   role: 'user' | 'bot';
-  content: React.ReactNode;
+  content: string;
 }
 
 const AI_API_URL = "https://dewyfiyiqdveqaockzfn.supabase.co/functions/v1/api";
@@ -29,15 +32,41 @@ const DEFAULT_MODEL = "google/gemini-2.5-flash-lite";
 
 export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const navigate = useNavigate();
-  const { plans, paymentMethods, loading: plansLoading } = usePlans();
+  const location = useLocation();
+  const { user, userData } = useAuth();
+  const { plans, paymentMethods, paymentProviders, loading: plansLoading } = usePlans();
   const [config, setConfig] = useState<ChatbotConfig | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [lastInteraction, setLastInteraction] = useState(Date.now());
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Keep track of raw messages for AI context
   const [aiHistory, setAiHistory] = useState<ChatMessage[]>([]);
+
+  // Inactivity timer to clear chat after 5 minutes
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const inactiveTime = Date.now() - lastInteraction;
+      if (inactiveTime > 5 * 60 * 1000) { // 5 minutes
+        if (messages.length > 1) {
+          setMessages([{ 
+            role: 'bot', 
+            content: `Chat session cleared due to 5 minutes of inactivity. How can I help you?` 
+          }]);
+          setAiHistory([]);
+        }
+      }
+    }, 30000); // Check every 30 seconds
+    return () => clearInterval(timer);
+  }, [lastInteraction, messages.length]);
+
+  useEffect(() => {
+    setLastInteraction(Date.now());
+  }, [messages]);
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'settings', 'chatbot'), (doc) => {
@@ -112,13 +141,31 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             ${config.systemPrompt}
             
             Current Dynamic Data:
+            - Current Page: ${location.pathname}
             - Plans: ${JSON.stringify(plans)}
             - Payment Methods: ${JSON.stringify(paymentMethods)}
+            - Payment Providers: ${JSON.stringify(paymentProviders)}
+            - User Status: ${userData?.subscription_status || 'free'}
+            - Pending Payment: ${userData?.pending_payment ? JSON.stringify(userData.pending_payment) : 'None'}
+            
+            Instructions for Payments:
+            If the user asks how to pay, list the available payment providers for their currency.
+            Available Providers: ${paymentProviders.filter(p => p.enabled).map(p => `${p.name} (${p.currency}): ${p.upiId} - Recipient: ${p.recipientName}`).join(' | ')}
+            
+            Instructions for Partial Payments:
+            If the user has a pending payment (paidAmount exists in pending_payment), inform them that they have already paid some amount.
+            If they mention a plan (e.g., "50 वाला"), calculate the remaining amount (Plan Price - paidAmount) and tell them: "Theek hai, [Plan Name] ke liye aapko [Remaining] aur dalna hoga. Screenshot bhejte hi activate ho jayega."
+            
+            If they just uploaded a screenshot and it was partial, ask them which plan they want and list the available plans.
+            
+            Current Pending Payment: ${userData?.pending_payment ? JSON.stringify(userData.pending_payment) : 'None'}
+            
+            Always be helpful and guide them to complete the payment.
           `
         }
       ]);
     }
-  }, [plans, paymentMethods, plansLoading, config]);
+  }, [plans, paymentMethods, plansLoading, config, userData, location.pathname]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -138,9 +185,166 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     }
   };
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user || !userData) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      return toast.error('Image size should be less than 5MB');
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64String = reader.result as string;
+      setMessages(prev => [...prev, { role: 'user', content: "Sent a payment screenshot for verification." }]);
+      setIsAnalyzing(true);
+
+      try {
+        // 1. Get all premium plans
+        const premiumPlans = plans.filter(p => p.id !== 'free');
+        if (premiumPlans.length === 0) throw new Error("No premium plans found.");
+
+        const countryCode = userData.country || 'IN';
+        
+        // Construct info about all plans for the AI
+        const allPlansInfo = premiumPlans.map(p => {
+          const price = p.prices[countryCode] || p.prices.DEFAULT;
+          return `${p.name}: ${price.symbol}${price.amount}`;
+        }).join(", ");
+
+        const planDetails = `Available Plans: ${allPlansInfo}`;
+
+        // Get valid recipients from dynamic providers
+        const validRecipients = paymentProviders
+          .filter(p => p.enabled)
+          .map(p => [p.recipientName, p.upiId])
+          .flat();
+        
+        // Add defaults
+        validRecipients.push("Sahid Anime 4 You", "SK HAMJA", "btthhindidubmasala@okicici");
+
+        // 2. Duplicate Detection
+        const q = query(collection(db, 'purchaseRequests'), where('screenshot', '==', base64String));
+        const duplicateSnapshot = await getDocs(q);
+        if (!duplicateSnapshot.empty) {
+          setMessages(prev => [...prev, { role: 'bot', content: "❌ This screenshot has already been used. Please provide a fresh payment proof." }]);
+          return;
+        }
+
+        // 3. AI Analysis
+        const aiResponse = await analyzePaymentScreenshot(base64String, planDetails, validRecipients);
+        let aiResult;
+        try {
+          const jsonStr = aiResponse.replace(/```json\n?|\n?```/g, '').trim();
+          aiResult = JSON.parse(jsonStr);
+        } catch (e) {
+          if (aiResponse.includes('APPROVED')) aiResult = { status: 'APPROVED' };
+          else if (aiResponse.includes('PARTIAL')) aiResult = { status: 'PARTIAL', reason: aiResponse };
+          else aiResult = { status: 'REJECTED', reason: aiResponse };
+        }
+
+        const paid = Number(aiResult.amount) || 0;
+        const existingPending = userData.pending_payment;
+        const totalPaidSoFar = (existingPending?.paidAmount || 0) + paid;
+
+        // Check if totalPaidSoFar matches any plan
+        const matchingPlan = premiumPlans.find(p => {
+          const price = p.prices[countryCode] || p.prices.DEFAULT;
+          return price.amount === totalPaidSoFar;
+        });
+
+        if (matchingPlan && aiResult.status !== 'REJECTED') {
+          const price = matchingPlan.prices[countryCode] || matchingPlan.prices.DEFAULT;
+          const expirationDate = getSubscriptionExpiration(price.duration as 'month' | 'year');
+          
+          await updateDoc(doc(db, 'users', user.uid), {
+            subscription_plan: matchingPlan.id,
+            subscription_status: 'active',
+            subscription_updated_at: serverTimestamp(),
+            subscription_expiry: expirationDate,
+            subscription_method: 'ai_chatbot',
+            pending_payment: null
+          });
+
+          await addDoc(collection(db, 'purchaseRequests'), {
+            userId: user.uid,
+            userName: userData.name || 'Anonymous',
+            userEmail: userData.email,
+            planId: matchingPlan.id,
+            planName: matchingPlan.name,
+            amount: price.amount.toString(),
+            paidAmount: totalPaidSoFar,
+            recipient: aiResult.recipient || 'SK HAMJA',
+            currency: price.currency,
+            country: countryCode,
+            transactionId: aiResult.utr || 'AI_CHATBOT_APPROVED',
+            utr: aiResult.utr || null,
+            battery: aiResult.battery || null,
+            screenshot: null, 
+            status: 'approved',
+            createdAt: serverTimestamp()
+          });
+
+          setMessages(prev => [...prev, { 
+            role: 'bot', 
+            content: `✅ **Payment Verified!**\n\nYour **${matchingPlan.name}** plan is now active. Enjoy ad-free anime!\n\n**Details:**\n- Total Paid: ${totalPaidSoFar}\n- Recipient: ${aiResult.recipient}\n- UTR: ${aiResult.utr}` 
+          }]);
+        } else if (paid > 0 && aiResult.status !== 'REJECTED') {
+          // It's a partial payment or we don't know the plan yet
+          
+          // If we don't have a matching plan, ask the user which plan they want
+          const plansList = premiumPlans.map(p => {
+            const price = p.prices[countryCode] || p.prices.DEFAULT;
+            return `- **${p.name}**: ${price.symbol}${price.amount}`;
+          }).join("\n");
+
+          await updateDoc(doc(db, 'users', user.uid), {
+            pending_payment: {
+              paidAmount: totalPaidSoFar,
+              timestamp: new Date().toISOString()
+            }
+          });
+
+          // Log the partial payment request
+          await addDoc(collection(db, 'purchaseRequests'), {
+            userId: user.uid,
+            userName: userData.name || 'Anonymous',
+            userEmail: userData.email,
+            amount: paid.toString(),
+            paidAmount: paid,
+            totalPaidSoFar: totalPaidSoFar,
+            recipient: aiResult.recipient || 'SK HAMJA',
+            currency: 'INR', // Default to INR for now as per user request context
+            country: countryCode,
+            transactionId: aiResult.utr || 'PARTIAL_CHATBOT',
+            utr: aiResult.utr || null,
+            status: 'partial',
+            aiReason: aiResult.reason,
+            createdAt: serverTimestamp()
+          });
+
+          setMessages(prev => [...prev, { 
+            role: 'bot', 
+            content: `Aapne **${paid}** rupaye bheje hain. Kya ye galti se kam amount bheja hai?\n\nHamare plans ye hain:\n${plansList}\n\nAap kaunsa plan lena chahte hain?` 
+          }]);
+        } else {
+          setMessages(prev => [...prev, { 
+            role: 'bot', 
+            content: `❌ **Verification Failed**\n\nReason: ${aiResult.reason || 'Invalid screenshot'}. Please try again with a clear photo.` 
+          }]);
+        }
+      } catch (error: any) {
+        setMessages(prev => [...prev, { role: 'bot', content: "Error verifying payment: " + error.message }]);
+      } finally {
+        setIsAnalyzing(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || isAnalyzing) return;
 
     const userMessage = input.trim();
     setInput('');
@@ -195,12 +399,27 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             </div>
           </div>
         </div>
-        <button 
-          onClick={onClose}
-          className="p-2 hover:bg-zinc-800 rounded-xl transition-colors text-zinc-500"
-        >
-          <X className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => {
+              setMessages([{ 
+                role: 'bot', 
+                content: `Chat cleared. How can I help you?` 
+              }]);
+              setAiHistory([]);
+            }}
+            className="p-2 hover:bg-zinc-800 rounded-xl transition-colors text-zinc-500"
+            title="Clear Chat"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+          <button 
+            onClick={onClose}
+            className="p-2 hover:bg-zinc-800 rounded-xl transition-colors text-zinc-500"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -230,7 +449,34 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 ? "bg-blue-600 text-white rounded-tr-none" 
                 : "bg-zinc-900 border border-zinc-800 text-zinc-300 rounded-tl-none"
             )}>
-              {msg.content}
+              {msg.role === 'bot' ? (
+                <div className="markdown-body prose prose-invert max-w-none">
+                  <ReactMarkdown 
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      a: ({node, ...props}) => (
+                        <a 
+                          {...props} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="text-blue-400 underline hover:text-blue-300 transition-colors inline-flex items-center gap-1"
+                        >
+                          {props.children}
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      ),
+                      p: ({children}) => <p className="mb-2 last:mb-0">{children}</p>,
+                      ul: ({children}) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
+                      ol: ({children}) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
+                      li: ({children}) => <li className="mb-1">{children}</li>
+                    }}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                msg.content
+              )}
             </div>
           </motion.div>
         ))}
@@ -245,25 +491,54 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             </div>
           </div>
         )}
+        {isAnalyzing && (
+          <div className="flex gap-3">
+            <div className="w-8 h-8 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-400 shadow-lg">
+              <Bot className="w-4 h-4" />
+            </div>
+            <div className="bg-zinc-900 border border-zinc-800 p-3 rounded-2xl rounded-tl-none flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+              <span className="text-xs text-zinc-500 font-medium">AI is scanning your payment screenshot...</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Input */}
       <form onSubmit={handleSubmit} className="p-4 border-t border-zinc-800 bg-zinc-900/50">
-        <div className="relative">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Search anime or type 'help'..."
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl pl-4 pr-12 py-3 text-sm focus:outline-none focus:border-blue-500 transition-all text-zinc-200"
-          />
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Search anime or type 'help'..."
+              className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl pl-4 pr-12 py-3 text-sm focus:outline-none focus:border-blue-500 transition-all text-zinc-200"
+            />
+            <button
+              type="submit"
+              disabled={!input.trim() || isLoading || isAnalyzing}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-500 transition-all disabled:opacity-50 disabled:scale-95"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
           <button
-            type="submit"
-            disabled={!input.trim() || isLoading}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-500 transition-all disabled:opacity-50 disabled:scale-95"
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isLoading || isAnalyzing}
+            className="p-3 bg-zinc-800 text-zinc-400 rounded-2xl hover:bg-zinc-700 hover:text-white transition-all disabled:opacity-50"
+            title="Upload Payment Screenshot"
           >
-            <Send className="w-4 h-4" />
+            <ImageIcon className="w-5 h-5" />
           </button>
+          <input 
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImageUpload}
+            accept="image/*"
+            className="hidden"
+          />
         </div>
       </form>
     </motion.div>
