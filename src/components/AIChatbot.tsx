@@ -11,11 +11,21 @@ import { usePlans } from '../hooks/usePlans';
 import { useAuth } from '../context/AuthContext';
 import { useLocation } from 'react-router-dom';
 import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
-import { analyzePaymentScreenshot } from '../services/aiService';
+import { analyzeImage } from '../services/aiService';
 import { getSubscriptionExpiration } from '../lib/subscriptionUtils';
 import { sendTelegramNotification } from '../services/telegramService';
 import { toast } from 'react-hot-toast';
 import { chatWithAI, ChatMessage } from '../services/aiService';
+import { setDoc } from 'firebase/firestore';
+
+const generateRedeemCode = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = '';
+  for (let i = 0; i < 8; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+};
 
 interface ChatbotConfig {
   enabled: boolean;
@@ -170,6 +180,32 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   }, [plans, paymentMethods, plansLoading, config, userData, location.pathname]);
 
   useEffect(() => {
+    const handleOpenChatbot = async (e: any) => {
+      if (e.detail?.message) {
+        const userMessage = e.detail.message;
+        setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+        setIsLoading(true);
+        try {
+          const newHistory: ChatMessage[] = [
+            { role: 'system', content: config?.systemPrompt || 'You are a helpful assistant for SahidAnime. Reply in Hinglish.' },
+            ...aiHistory,
+            { role: 'user', content: userMessage }
+          ];
+          const response = await chatWithAI(newHistory);
+          setMessages(prev => [...prev, { role: 'bot', content: response }]);
+          setAiHistory([...newHistory, { role: 'assistant', content: response }]);
+        } catch (error) {
+          console.error("Event AI Error:", error);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    };
+    window.addEventListener('open-chatbot' as any, handleOpenChatbot);
+    return () => window.removeEventListener('open-chatbot' as any, handleOpenChatbot);
+  }, [config, aiHistory]);
+
+  useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
@@ -198,17 +234,14 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     const reader = new FileReader();
     reader.onloadend = async () => {
       const base64String = reader.result as string;
-      setMessages(prev => [...prev, { role: 'user', content: "Sent a payment screenshot for verification." }]);
+      setMessages(prev => [...prev, { role: 'user', content: "Sent an image for analysis." }]);
       setIsAnalyzing(true);
 
       try {
         // 1. Get all premium plans
         const premiumPlans = plans.filter(p => p.id !== 'free');
-        if (premiumPlans.length === 0) throw new Error("No premium plans found.");
-
-        const countryCode = userData.country || 'IN';
+        const countryCode = userData?.country || 'IN';
         
-        // Construct info about all plans for the AI
         const allPlansInfo = premiumPlans.map(p => {
           const price = p.prices[countryCode] || p.prices.DEFAULT;
           return `${p.name}: ${price.symbol}${price.amount}`;
@@ -222,140 +255,164 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           .map(p => [p.recipientName, p.upiId])
           .flat();
         
-        // Add defaults
         validRecipients.push("Sahid Anime 4 You", "SK HAMJA", "btthhindidubmasala@okicici");
 
         // 2. AI Analysis
-        const aiResponse = await analyzePaymentScreenshot(base64String, planDetails, validRecipients);
+        const aiResponse = await analyzeImage(base64String, planDetails, validRecipients);
         let aiResult;
         try {
           const jsonStr = aiResponse.replace(/```json\n?|\n?```/g, '').trim();
           aiResult = JSON.parse(jsonStr);
         } catch (e) {
-          if (aiResponse.includes('APPROVED')) aiResult = { status: 'APPROVED' };
-          else if (aiResponse.includes('PARTIAL')) aiResult = { status: 'PARTIAL', reason: aiResponse };
-          else aiResult = { status: 'REJECTED', reason: aiResponse };
+          aiResult = { type: 'GENERAL', generalInfo: { description: "AI could not parse JSON, but here is the raw response.", reaction: aiResponse } };
         }
 
-        // 3. Duplicate Detection by UTR (Very Important!)
-        if (aiResult.utr) {
-          try {
-            const q = query(collection(db, 'purchaseRequests'), where('utr', '==', aiResult.utr));
-            const duplicateSnapshot = await getDocs(q);
-            if (!duplicateSnapshot.empty) {
-              setMessages(prev => [...prev, { 
-                role: 'bot', 
-                content: "❌ Ye Transaction ID (UTR) pehle hi use ho chuka hai. Please naya payment screenshot bhejein." 
-              }]);
-              return;
+        if (aiResult.type === 'PAYMENT') {
+          const pInfo = aiResult.paymentInfo;
+          
+          // 3. Duplicate Detection by UTR
+          if (pInfo.utr) {
+            try {
+              const q = query(collection(db, 'purchaseRequests'), where('utr', '==', pInfo.utr));
+              const duplicateSnapshot = await getDocs(q);
+              if (!duplicateSnapshot.empty) {
+                setMessages(prev => [...prev, { 
+                  role: 'bot', 
+                  content: "❌ Ye Transaction ID (UTR) pehle hi use ho chuka hai. Please naya payment screenshot bhejein." 
+                }]);
+                return;
+              }
+            } catch (e) {
+              console.warn('Duplicate UTR check failed, skipping...', e);
             }
-          } catch (e) {
-            console.warn('Duplicate UTR check failed, skipping...', e);
           }
-        }
 
-        const paid = Number(aiResult.amount) || 0;
-        const existingPending = userData.pending_payment;
-        const totalPaidSoFar = (existingPending?.paidAmount || 0) + paid;
+          const paid = Number(pInfo.amount) || 0;
+          const existingPending = userData?.pending_payment;
+          const totalPaidSoFar = (existingPending?.paidAmount || 0) + paid;
 
-        // Check if totalPaidSoFar matches any plan
-        const matchingPlan = premiumPlans.find(p => {
-          const price = p.prices[countryCode] || p.prices.DEFAULT;
-          return price.amount === totalPaidSoFar;
-        });
-
-        if (matchingPlan && aiResult.status !== 'REJECTED') {
-          const price = matchingPlan.prices[countryCode] || matchingPlan.prices.DEFAULT;
-          const expirationDate = getSubscriptionExpiration(price.duration as 'month' | 'year');
-          
-          await updateDoc(doc(db, 'users', user.uid), {
-            subscription_plan: matchingPlan.id,
-            subscription_status: 'active',
-            subscription_updated_at: serverTimestamp(),
-            subscription_expiry: expirationDate,
-            subscription_method: 'ai_chatbot',
-            pending_payment: null
-          });
-
-          await addDoc(collection(db, 'purchaseRequests'), {
-            userId: user.uid,
-            userName: userData.name || 'Anonymous',
-            userEmail: userData.email,
-            planId: matchingPlan.id,
-            planName: matchingPlan.name,
-            amount: price.amount.toString(),
-            paidAmount: totalPaidSoFar,
-            recipient: aiResult.recipient || 'SK HAMJA',
-            currency: price.currency,
-            country: countryCode,
-            transactionId: aiResult.utr || 'AI_CHATBOT_APPROVED',
-            utr: aiResult.utr || null,
-            battery: aiResult.battery || null,
-            screenshot: null, 
-            status: 'approved',
-            createdAt: serverTimestamp()
-          });
-
-          // Telegram Notification
-          const telegramMessage = `🚀 *AI CHATBOT APPROVED*\n\n✅ *User:* ${userData.name || 'Anonymous'}\n📧 *Email:* ${userData.email}\n📦 *Plan:* ${matchingPlan.name}\n💰 *Amount:* ${price.symbol}${price.amount}\n🌍 *Country:* ${countryCode}\n✨ *Status:* Activated via Chatbot\n🆔 *UTR:* ${aiResult.utr || 'N/A'}`;
-          await sendTelegramNotification(telegramMessage);
-
-          setMessages(prev => [...prev, { 
-            role: 'bot', 
-            content: `✅ **Payment Verified!**\n\nAapka **${matchingPlan.name}** plan activate ho gaya hai. Enjoy ad-free anime!\n\n**Details:**\n- Total Paid: ₹${totalPaidSoFar}\n- Recipient: ${aiResult.recipient}\n- UTR: ${aiResult.utr}` 
-          }]);
-        } else if (paid > 0 && aiResult.status !== 'REJECTED') {
-          // It's a partial payment or we don't know the plan yet
-          
-          // If we don't have a matching plan, ask the user which plan they want
-          const plansList = premiumPlans.map(p => {
+          // Check if totalPaidSoFar matches any plan
+          const matchingPlan = premiumPlans.find(p => {
             const price = p.prices[countryCode] || p.prices.DEFAULT;
-            return `- **${p.name}**: ${price.symbol}${price.amount}`;
-          }).join("\n");
+            return price.amount === totalPaidSoFar;
+          });
 
-          await updateDoc(doc(db, 'users', user.uid), {
-            pending_payment: {
+          if (matchingPlan && pInfo.status !== 'REJECTED') {
+            const price = matchingPlan.prices[countryCode] || matchingPlan.prices.DEFAULT;
+            
+            // GENERATE REDEEM CODE INSTEAD OF DIRECT ACTIVATION
+            const redeemCode = generateRedeemCode();
+            
+            await setDoc(doc(db, 'redeemCodes', redeemCode), {
+              code: redeemCode,
+              planId: matchingPlan.id,
+              planName: matchingPlan.name,
+              maxUses: 1,
+              usedCount: 0,
+              usedBy: [],
+              createdAt: serverTimestamp(),
+              generatedBy: 'chatbot_ai',
+              userId: user?.uid || 'anonymous'
+            });
+
+            await addDoc(collection(db, 'purchaseRequests'), {
+              userId: user?.uid || 'anonymous',
+              userName: userData?.name || 'Anonymous',
+              userEmail: userData?.email,
+              planId: matchingPlan.id,
+              planName: matchingPlan.name,
+              amount: price.amount.toString(),
               paidAmount: totalPaidSoFar,
-              currency: 'INR', // Default to INR as per user context
-              timestamp: new Date().toISOString()
+              recipient: pInfo.recipient || 'SK HAMJA',
+              currency: price.currency,
+              country: countryCode,
+              transactionId: pInfo.utr || 'AI_CHATBOT_COUPON',
+              utr: pInfo.utr || null,
+              battery: pInfo.battery || null,
+              screenshot: null, 
+              status: 'approved',
+              redeemCode: redeemCode,
+              createdAt: serverTimestamp()
+            });
+
+            // Telegram Notification
+            const telegramMessage = `🚀 *AI CHATBOT COUPON GENERATED*\n\n✅ *User:* ${userData?.name || 'Anonymous'}\n📧 *Email:* ${userData?.email}\n📦 *Plan:* ${matchingPlan.name}\n💰 *Amount:* ${price.symbol}${price.amount}\n🌍 *Country:* ${countryCode}\n✨ *Coupon:* \`${redeemCode}\`\n🆔 *UTR:* ${pInfo.utr || 'N/A'}`;
+            await sendTelegramNotification(telegramMessage);
+
+            setMessages(prev => [...prev, { 
+              role: 'bot', 
+              content: `✅ **Payment Verified!**\n\nAapka payment verify ho gaya hai. Aapka **${matchingPlan.name}** plan ka coupon code ye hai:\n\n**CODE:** \`${redeemCode}\`\n\nIsko [**Redeem Code**](/redeem) page par jaakar use karein apna premium activate karne ke liye!` 
+            }]);
+            
+            // Clear pending payment after success
+            if (user) {
+              await updateDoc(doc(db, 'users', user.uid), {
+                pending_payment: null
+              });
             }
-          });
 
-          // Log the partial payment request
-          await addDoc(collection(db, 'purchaseRequests'), {
-            userId: user.uid,
-            userName: userData.name || 'Anonymous',
-            userEmail: userData.email,
-            amount: paid.toString(),
-            paidAmount: paid,
-            totalPaidSoFar: totalPaidSoFar,
-            recipient: aiResult.recipient || 'SK HAMJA',
-            currency: 'INR',
-            country: countryCode,
-            transactionId: aiResult.utr || 'PARTIAL_CHATBOT',
-            utr: aiResult.utr || null,
-            status: 'partial',
-            aiReason: aiResult.reason,
-            createdAt: serverTimestamp()
-          });
+          } else if (paid > 0 && pInfo.status !== 'REJECTED') {
+            const plansList = premiumPlans.map(p => {
+              const price = p.prices[countryCode] || p.prices.DEFAULT;
+              return `- **${p.name}**: ${price.symbol}${price.amount}`;
+            }).join("\n");
 
-          // Telegram Notification
-          const telegramMessage = `⚠️ *AI CHATBOT PARTIAL*\n\n👤 *User:* ${userData.name || 'Anonymous'}\n💰 *Paid:* ${paid}\n📉 *Total Paid:* ${totalPaidSoFar}\n🆔 *UTR:* ${aiResult.utr || 'N/A'}`;
-          await sendTelegramNotification(telegramMessage);
+            if (user) {
+              await updateDoc(doc(db, 'users', user.uid), {
+                pending_payment: {
+                  paidAmount: totalPaidSoFar,
+                  currency: 'INR',
+                  timestamp: new Date().toISOString()
+                }
+              });
+            }
 
-          setMessages(prev => [...prev, { 
-            role: 'bot', 
-            content: `Aapne **₹${paid}** bheje hain. Kya ye galti se kam amount bheja hai?\n\nHamare plans ye hain:\n${plansList}\n\nAap kaunsa plan lena chahte hain?` 
-          }]);
+            await addDoc(collection(db, 'purchaseRequests'), {
+              userId: user?.uid || 'anonymous',
+              userName: userData?.name || 'Anonymous',
+              userEmail: userData?.email,
+              amount: paid.toString(),
+              paidAmount: paid,
+              totalPaidSoFar: totalPaidSoFar,
+              recipient: pInfo.recipient || 'SK HAMJA',
+              currency: 'INR',
+              country: countryCode,
+              transactionId: pInfo.utr || 'PARTIAL_CHATBOT',
+              utr: pInfo.utr || null,
+              status: 'partial',
+              aiReason: pInfo.reason,
+              createdAt: serverTimestamp()
+            });
+
+            const telegramMessage = `⚠️ *AI CHATBOT PARTIAL*\n\n👤 *User:* ${userData?.name || 'Anonymous'}\n💰 *Paid:* ${paid}\n📉 *Total Paid:* ${totalPaidSoFar}\n🆔 *UTR:* ${pInfo.utr || 'N/A'}`;
+            await sendTelegramNotification(telegramMessage);
+
+            setMessages(prev => [...prev, { 
+              role: 'bot', 
+              content: `Aapne **₹${paid}** bheje hain. Kya ye galti se kam amount bheja hai?\n\nHamare plans ye hain:\n${plansList}\n\nAap kaunsa plan lena chahte hain?` 
+            }]);
+          } else {
+            const telegramMessage = `❌ *AI CHATBOT REJECTED*\n\n👤 *User:* ${userData?.name || 'Anonymous'}\n📧 *Email:* ${userData?.email}\n🆔 *UTR:* ${pInfo.utr || 'N/A'}\n⚠️ *Reason:* ${pInfo.reason || 'Invalid screenshot'}`;
+            await sendTelegramNotification(telegramMessage);
+
+            setMessages(prev => [...prev, { 
+              role: 'bot', 
+              content: `❌ **Verification Failed**\n\nReason: ${pInfo.reason || 'Invalid screenshot'}. Please try again with a clear photo.` 
+            }]);
+          }
         } else {
-          // Telegram Notification for Rejection
-          const telegramMessage = `❌ *AI CHATBOT REJECTED*\n\n👤 *User:* ${userData.name || 'Anonymous'}\n📧 *Email:* ${userData.email}\n🆔 *UTR:* ${aiResult.utr || 'N/A'}\n⚠️ *Reason:* ${aiResult.reason || 'Invalid screenshot'}`;
-          await sendTelegramNotification(telegramMessage);
-
+          // GENERAL IMAGE
+          const gInfo = aiResult.generalInfo;
           setMessages(prev => [...prev, { 
             role: 'bot', 
-            content: `❌ **Verification Failed**\n\nReason: ${aiResult.reason || 'Invalid screenshot'}. Please try again with a clear photo.` 
+            content: `📸 **Image Analysis:**\n\n${gInfo.description}\n\n${gInfo.reaction}` 
           }]);
+          
+          // Add to AI history for context
+          setAiHistory(prev => [...prev, 
+            { role: 'user', content: "Sent an image for analysis." },
+            { role: 'assistant', content: `I saw an image: ${gInfo.description}. My reaction: ${gInfo.reaction}` }
+          ]);
         }
       } catch (error: any) {
         setMessages(prev => [...prev, { role: 'bot', content: "Error verifying payment: " + error.message }]);
@@ -408,7 +465,7 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       initial={{ opacity: 0, y: 20, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 20, scale: 0.95 }}
-      className="w-[350px] sm:w-[400px] h-[500px] bg-zinc-950 border border-zinc-800 rounded-3xl shadow-2xl flex flex-col overflow-hidden"
+      className="w-full sm:w-[450px] h-[85vh] sm:h-[600px] bg-zinc-950 border border-zinc-800 rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden fixed bottom-0 right-0 sm:bottom-6 sm:right-6 z-[100]"
     >
       {/* Header */}
       <div className="p-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">

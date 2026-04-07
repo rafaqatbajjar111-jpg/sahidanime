@@ -255,7 +255,7 @@ export const AnimeDetails: React.FC = () => {
       setShowPlayer(true);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else if (ep.accessType === 'premium') {
-      navigate('/premium');
+      setShowPremiumModal(true);
     } else {
       toast.error('This episode is currently locked');
     }
@@ -592,169 +592,41 @@ export const AnimeDetails: React.FC = () => {
       {/* Premium Subscription Modal */}
       {showPremiumModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300">
-          <div className={cn(
-            "rounded-[2rem] p-6 w-full max-w-md space-y-6 shadow-2xl relative overflow-hidden max-h-[90vh] overflow-y-auto custom-scrollbar transition-colors duration-300",
-            selectedPlan ? "bg-white text-zinc-900" : "bg-zinc-900 text-white border border-zinc-800"
-          )}>
-            {/* Background Glow */}
-            <div className={cn(
-              "absolute -top-24 -right-24 w-48 h-48 blur-[80px] rounded-full",
-              selectedPlan ? "bg-blue-600/5" : "bg-blue-600/10"
-            )} />
+          <div className="bg-zinc-900 border border-zinc-800 rounded-[2rem] p-10 w-full max-w-md text-center space-y-8 relative overflow-hidden">
+            <div className="absolute -top-24 -right-24 w-48 h-48 bg-blue-600/10 blur-[80px] rounded-full" />
             
             <button 
-              onClick={() => {
-                setShowPremiumModal(false);
-                setSelectedPlan(null);
-                setTransactionId('');
-                setScreenshot(null);
-              }} 
-              className={cn(
-                "absolute top-4 right-4 p-2 transition-colors z-50 rounded-full",
-                selectedPlan ? "text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100" : "text-zinc-500 hover:text-white hover:bg-white/10"
-              )}
+              onClick={() => setShowPremiumModal(false)}
+              className="absolute top-4 right-4 p-2 text-zinc-500 hover:text-white transition-colors z-50"
             >
               <X className="w-6 h-6" />
             </button>
 
-            {!selectedPlan ? (
-              <div className="space-y-6 relative z-10">
-                <div className="text-center space-y-2">
-                  <div className="w-14 h-14 bg-blue-600/10 rounded-2xl flex items-center justify-center mx-auto mb-2">
-                    <Crown className="w-7 h-7 text-blue-500" />
-                  </div>
-                  <h2 className="text-2xl font-black tracking-tight">Unlock Premium</h2>
-                  <p className="text-zinc-400 text-xs">Choose a plan to continue watching</p>
-                </div>
-
-                <div className="space-y-3">
-                  {plans.map((plan) => {
-                    const priceData = plan.prices[countryCode as keyof typeof plan.prices] || plan.prices.DEFAULT;
-                    return (
-                      <button
-                        key={plan.id}
-                        onClick={() => setSelectedPlan(plan)}
-                        className="w-full group relative flex items-center justify-between p-4 bg-zinc-800/30 border border-zinc-700/30 rounded-2xl hover:border-blue-500/50 hover:bg-zinc-800/50 transition-all text-left"
-                      >
-                        <div className="space-y-0.5">
-                          <h3 className="font-black text-sm text-white group-hover:text-blue-400 transition-colors">{plan.name}</h3>
-                          <p className="text-[10px] text-zinc-500 font-medium">{plan.description}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-lg font-black text-white">{priceData.symbol}{priceData.amount}</p>
-                          <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-widest">/{priceData.duration}</p>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+            <div className="relative z-10 space-y-6">
+              <div className="w-20 h-20 bg-blue-600/20 rounded-3xl flex items-center justify-center mx-auto animate-pulse">
+                <Crown className="w-10 h-10 text-blue-500" />
               </div>
-            ) : (
-              <div className="space-y-6 relative z-10">
-                <div className="text-center space-y-2">
-                  <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto shadow-xl shadow-blue-600/20 rotate-3 mb-2">
-                    <CreditCard className="w-7 h-7 text-white" />
-                  </div>
-                  <h2 className="text-2xl font-black tracking-tight text-zinc-900">Complete Payment</h2>
-                  <p className="text-zinc-500 text-xs">Plan: <span className="text-blue-600 font-bold">{selectedPlan.name}</span></p>
-                </div>
-
-                <div className="bg-zinc-50 border border-zinc-100 rounded-2xl p-6 space-y-5">
-                  {/* Payment Details at the Top */}
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2 text-blue-600 font-black text-[10px] uppercase tracking-wider">
-                      <Zap className="w-3.5 h-3.5 fill-current" />
-                      {(paymentMethods[countryCode] || paymentMethods.DEFAULT)?.method} Details
-                    </div>
-                    <div className="p-4 bg-white rounded-xl border border-zinc-200 space-y-2 shadow-sm">
-                      <div className="text-lg font-black text-zinc-900 select-all text-center tracking-tight">
-                        {(paymentMethods[countryCode] || paymentMethods.DEFAULT)?.details}
-                      </div>
-                      <div className="text-center space-y-0.5">
-                        <p className="text-[10px] text-zinc-500 font-bold">Account: {(paymentMethods[countryCode] || paymentMethods.DEFAULT)?.name}</p>
-                        <p className="text-[9px] text-blue-600 italic">{(paymentMethods[countryCode] || paymentMethods.DEFAULT)?.instruction}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="h-px bg-zinc-200" />
-
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <p className="text-[8px] font-black text-zinc-400 uppercase tracking-widest">Amount to Pay</p>
-                      <p className="text-2xl font-black text-zinc-900">
-                        {(selectedPlan.prices[countryCode as keyof typeof selectedPlan.prices] || selectedPlan.prices.DEFAULT).symbol}
-                        {(selectedPlan.prices[countryCode as keyof typeof selectedPlan.prices] || selectedPlan.prices.DEFAULT).amount}
-                      </p>
-                    </div>
-                    <div className="text-right space-y-0.5">
-                      <p className="text-[8px] font-black text-zinc-400 uppercase tracking-widest">Region</p>
-                      <div className="flex items-center justify-end gap-1.5 text-zinc-900 font-bold text-sm">
-                        <Globe className="w-3.5 h-3.5 text-blue-600" />
-                        {countryCode}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[9px] font-black text-zinc-400 uppercase tracking-widest ml-1">Upload Payment Screenshot</label>
-                    <div className="relative">
-                      <input 
-                        type="file"
-                        accept="image/*"
-                        onChange={handleFileChange}
-                        className="hidden"
-                        id="screenshot-upload-details"
-                      />
-                      <label 
-                        htmlFor="screenshot-upload-details"
-                        className="flex flex-col items-center justify-center w-full h-40 bg-white border-2 border-dashed border-zinc-200 rounded-2xl cursor-pointer hover:border-blue-600 transition-all overflow-hidden shadow-sm"
-                      >
-                        {screenshot ? (
-                          <img src={screenshot} alt="Preview" className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="flex flex-col items-center gap-2 text-zinc-400">
-                            <div className="w-10 h-10 rounded-full bg-zinc-50 flex items-center justify-center">
-                              <Upload className="w-5 h-5" />
-                            </div>
-                            <span className="text-[10px] font-bold">Select Payment Photo</span>
-                          </div>
-                        )}
-                      </label>
-                      {screenshot && (
-                        <button 
-                          onClick={() => setScreenshot(null)}
-                          className="absolute top-2 right-2 p-1.5 bg-red-500 rounded-full text-white shadow-lg hover:bg-red-600 transition-colors"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
-                  <button 
-                    onClick={() => setSelectedPlan(null)}
-                    className="flex-1 py-4 rounded-2xl font-black text-sm bg-zinc-100 hover:bg-zinc-200 text-zinc-900 transition-all"
-                  >
-                    Back
-                  </button>
-                  <button 
-                    disabled={isSubmitting || !screenshot}
-                    onClick={handleSubmitRequest}
-                    className="flex-[2] bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-black text-sm transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 shadow-xl shadow-blue-600/20"
-                  >
-                    {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : (
-                      <>
-                        Submit Payment Request
-                        <ArrowRight className="w-4 h-4" />
-                      </>
-                    )}
-                  </button>
-                </div>
+              
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black tracking-tight text-white">Unlock Premium</h2>
+                <p className="text-zinc-500 text-sm leading-relaxed">
+                  Premium content dekhne ke liye aapko subscription chahiye. 
+                  Aap **Chatbot** se plan select karke payment verify kar sakte hain.
+                </p>
               </div>
-            )}
+
+              <button 
+                onClick={() => {
+                  setShowPremiumModal(false);
+                  window.dispatchEvent(new CustomEvent('open-chatbot', { 
+                    detail: { message: 'I need a plan' } 
+                  }));
+                }}
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-black text-sm transition-all active:scale-95 shadow-xl shadow-blue-600/20"
+              >
+                Get Premium via Chatbot
+              </button>
+            </div>
           </div>
         </div>
       )}

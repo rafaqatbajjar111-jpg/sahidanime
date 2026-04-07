@@ -46,7 +46,7 @@ export const chatWithAI = async (messages: ChatMessage[]) => {
   }
 };
 
-export const analyzePaymentScreenshot = async (base64Image: string, planDetails: string, validRecipients: string[] = ["Sahid Anime 4 You", "SK HAMJA", "btthhindidubmasala@okicici"]) => {
+export const analyzeImage = async (base64Image: string, planDetails: string, validRecipients: string[] = ["Sahid Anime 4 You", "SK HAMJA", "btthhindidubmasala@okicici"]) => {
   const apiKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
   if (!apiKey) {
     throw new Error('AI Service is not configured. Please add VITE_SUPABASE_ANON_KEY to environment variables.');
@@ -57,44 +57,47 @@ export const analyzePaymentScreenshot = async (base64Image: string, planDetails:
   const currentTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 
   const prompt = `
-    You are an automated payment verification agent for SahidAnime.
+    You are an intelligent assistant for SahidAnime.
     Today's Date: ${currentDate}
     Current Time: ${currentTime}
 
-    Your task is to analyze the provided payment screenshot and determine if it is a valid, real payment.
-    The user is interested in one of these plans:
-    ${planDetails}
+    Your task is to analyze the provided image. 
+    
+    1. If the image is a **Payment Screenshot** (UPI, Bank Transfer, etc.):
+       - Extraction: Extract amount, UTR/Transaction ID, recipient name, and phone battery percentage.
+       - Verification: Check if it matches one of these plans: ${planDetails}.
+       - Recipient Match: The recipient MUST be one of these: ${recipientsList}.
+       - Status: Must be "Success" or "Completed".
+       - Date Check: Must be Today (${currentDate}) or Yesterday.
+       - Respond with type: "PAYMENT".
+       - If verified, tell them: "✅ Payment Verified! Aapka coupon code generate ho gaya hai. Isko redeem page par use karein: [Link to Redeem]"
 
-    CRITICAL VERIFICATION STEPS:
-    1. **Amount Detection**: Extract the exact amount paid from the screenshot.
-    2. **Recipient Match**: The recipient MUST be one of these: ${recipientsList}.
-    3. **Transaction Status**: Must be "Success", "Completed", or "Successful".
-    4. **Date Check**: The transaction date must be recent. Today is ${currentDate}.
-       - Accept dates that are Today (${currentDate}) or Yesterday.
-       - If the screenshot shows a date that matches ${currentDate}, it is NOT a future date. It is TODAY.
-       - Be lenient with timezones; if the time in the screenshot is slightly ahead of ${currentTime}, it might be due to a different timezone setting on the user's phone. Do not reject solely on a few hours difference unless it's a completely different day in the future.
-    5. **Authenticity**: Check for signs of editing, fake fonts, or reused screenshots.
-    6. **Metadata Extraction**: Extract:
-       - **status**: "APPROVED" (if it matches one of the plan prices exactly), "PARTIAL" (if it's less than a plan price), or "REJECTED" (invalid).
-       - **utr**: The UTR/Transaction ID.
-       - **battery**: Phone battery percentage.
-       - **amount**: The exact amount paid as seen in screenshot.
-       - **recipient**: The name of the person/business paid (e.g., "SK HAMJA").
+    2. If the user says something like "Mujhe plan chahie", "I need a plan", "Plans dikhao", etc.:
+       - List all available plans from ${planDetails} in a clear, formatted way.
+       - Tell them to pay the exact amount to one of the UPI IDs and send the screenshot here.
+
+    3. If the image is **NOT a payment screenshot** (e.g., a selfie, a landscape, a meme, anime art, etc.):
+       - Analyze what is in the image.
+       - Respond with type: "GENERAL".
 
     Respond ONLY with a JSON object:
     {
-      "status": "APPROVED" | "PARTIAL" | "REJECTED",
-      "utr": "extracted_utr_or_null",
-      "battery": "extracted_battery_percentage_or_null",
-      "amount": number,
-      "recipient": "extracted_name",
-      "reason": "Reason if REJECTED or PARTIAL (in Hinglish style - Hindi/English mix)"
+      "type": "PAYMENT" | "GENERAL",
+      "paymentInfo": {
+        "status": "APPROVED" | "PARTIAL" | "REJECTED",
+        "utr": "extracted_utr_or_null",
+        "battery": "extracted_battery_percentage_or_null",
+        "amount": number,
+        "recipient": "extracted_name",
+        "reason": "Reason if REJECTED or PARTIAL (in Hinglish style - Hindi/English mix)"
+      },
+      "generalInfo": {
+        "description": "A brief description of what you see in the image (in Hinglish style)",
+        "reaction": "A friendly reaction or comment about the image (in Hinglish style)"
+      }
     }
     
-    Example for PARTIAL: { "status": "PARTIAL", "amount": 45, "reason": "Aapne 45 rupaye bheje hain, 5 rupaye aur bhej kar activate karein." }
-    Example for REJECTED: { "status": "REJECTED", "reason": "Ye screenshot clear nahi hai ya purana hai. Please naya screenshot bhejein." }
-    
-    Be extremely strict. If you are unsure, REJECT.
+    Be extremely strict with payments. If you are unsure if it's a payment, mark it as GENERAL.
   `;
 
   try {

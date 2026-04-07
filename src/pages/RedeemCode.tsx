@@ -16,6 +16,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
 import { toast } from 'react-hot-toast';
 import { Link, useNavigate } from 'react-router-dom';
+import { sendTelegramNotification } from '../services/telegramService';
 import { usePlans } from '../hooks/usePlans';
 import { getSubscriptionExpiration } from '../lib/subscriptionUtils';
 
@@ -73,6 +74,10 @@ export const RedeemCode: React.FC = () => {
       });
 
       await batch.commit();
+
+      // Telegram Notification
+      const telegramMessage = `🎟️ *COUPON REDEEMED*\n\n👤 *User:* ${userData?.name || 'Anonymous'}\n📧 *Email:* ${userData?.email}\n📦 *Plan:* ${codeData.planName}\n✨ *Code:* \`${codeId}\`\n📅 *Expiry:* ${expirationDate.toLocaleDateString()}`;
+      await sendTelegramNotification(telegramMessage);
 
       setRedeemedPlan(codeData.planName);
       setSuccess(true);
@@ -174,7 +179,7 @@ export const RedeemCode: React.FC = () => {
 
           <div className="text-center">
             <p className="text-xs text-zinc-500">
-              Don't have a code? <Link to="/premium" className="text-blue-500 font-bold hover:underline">Buy Premium</Link>
+              Don't have a code? <span className="text-blue-500 font-bold">Contact Support</span>
             </p>
           </div>
 

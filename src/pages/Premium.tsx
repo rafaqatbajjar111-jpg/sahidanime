@@ -2,17 +2,44 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { collection, addDoc, serverTimestamp, doc, updateDoc, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
-import { Crown, Check, ShieldCheck, Zap, Star, Loader2, Globe, CreditCard, X, ArrowRight, Upload, Sparkles, AlertCircle } from 'lucide-react';
+import { Crown, Check, ShieldCheck, Zap, Star, Loader2, Globe, CreditCard, X, ArrowRight, Upload, Sparkles, AlertCircle, ShieldAlert } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { usePlans } from '../hooks/usePlans';
 import { sendTelegramNotification } from '../services/telegramService';
-import { analyzePaymentScreenshot } from '../services/aiService';
+import { analyzeImage } from '../services/aiService';
 import { getSubscriptionExpiration } from '../lib/subscriptionUtils';
 
 export const Premium: React.FC = () => {
+  const { userData, user } = useAuth();
+  
+  return (
+    <div className="min-h-screen bg-black flex items-center justify-center p-6 italic">
+      <div className="max-w-md w-full text-center space-y-6">
+        <div className="w-20 h-20 bg-blue-600/20 rounded-3xl flex items-center justify-center mx-auto animate-pulse">
+          <ShieldAlert className="w-10 h-10 text-blue-500" />
+        </div>
+        <div className="space-y-2">
+          <h1 className="text-3xl font-black text-white tracking-tight">Premium Disabled</h1>
+          <p className="text-zinc-500 text-sm leading-relaxed">
+            Premium page abhi temporary disable kar di gayi hai. 
+            Aap **Chatbot** ka use karke payment verify karwa sakte hain aur coupon code le sakte hain.
+          </p>
+        </div>
+        <button 
+          onClick={() => window.dispatchEvent(new CustomEvent('open-chatbot'))}
+          className="px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-2xl transition-all active:scale-95 shadow-xl shadow-blue-600/20"
+        >
+          Open Chatbot
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const PremiumOld: React.FC = () => {
   const { userData, user } = useAuth();
   const { plans, paymentMethods, paymentProviders, loading: plansLoading } = usePlans();
   const [countryCode, setCountryCode] = useState('IN');
@@ -86,7 +113,7 @@ export const Premium: React.FC = () => {
       validRecipients.push("Sahid Anime 4 You", "SK HAMJA", "btthhindidubmasala@okicici");
 
       // 2. AI Analysis
-      const aiResponse = await analyzePaymentScreenshot(screenshot, planDetails, validRecipients);
+      const aiResponse = await analyzeImage(screenshot, planDetails, validRecipients);
       let aiResult;
       try {
         const jsonStr = aiResponse.replace(/```json\n?|\n?```/g, '').trim();

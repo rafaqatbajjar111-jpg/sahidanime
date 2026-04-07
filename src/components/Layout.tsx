@@ -42,7 +42,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   const navItems = [
     { name: 'Home', icon: Home, path: '/' },
-    { name: 'Premium', icon: Crown, path: '/premium' },
     { name: 'Profile', icon: User, path: '/profile' },
   ];
 

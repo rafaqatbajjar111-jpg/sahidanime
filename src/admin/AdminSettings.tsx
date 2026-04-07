@@ -35,6 +35,7 @@ interface TelegramConfig {
   botToken: string;
   chatId: string;
   enabled: boolean;
+  appUrl?: string;
 }
 
 interface SupportConfig {
@@ -63,7 +64,8 @@ export const AdminSettings: React.FC = () => {
   const [config, setConfig] = useState<TelegramConfig>({
     botToken: '',
     chatId: '',
-    enabled: false
+    enabled: false,
+    appUrl: window.location.origin
   });
   const [supportConfig, setSupportConfig] = useState<SupportConfig>({
     telegram: '',
@@ -342,6 +344,19 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
                   placeholder="-100123456789"
                   value={config.chatId}
                   onChange={(e) => setConfig({ ...config, chatId: e.target.value })}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-blue-500 transition-all"
+                />
+              </div>
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-xs font-black uppercase tracking-widest text-zinc-500 ml-1">Application URL (for bot links)</label>
+              <div className="relative group">
+                <ExternalLink className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:text-blue-500 transition-colors" />
+                <input 
+                  type="text"
+                  placeholder="https://your-app.com"
+                  value={config.appUrl}
+                  onChange={(e) => setConfig({ ...config, appUrl: e.target.value })}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-blue-500 transition-all"
                 />
               </div>
