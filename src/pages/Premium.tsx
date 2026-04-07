@@ -240,6 +240,10 @@ export const Premium: React.FC = () => {
           aiReason: aiResult.reason,
           createdAt: serverTimestamp()
         });
+
+        // Telegram Notification for Rejection
+        const telegramMessage = `❌ *AI PAYMENT REJECTED*\n\n👤 *User:* ${userData.name || 'Anonymous'}\n📧 *Email:* ${userData.email}\n📦 *Plan:* ${selectedPlan.name}\n💰 *Amount:* ${planPrice.symbol}${planPrice.amount}\n🆔 *UTR:* ${aiResult.utr || 'N/A'}\n⚠️ *Reason:* ${aiResult.reason || 'Invalid screenshot'}`;
+        await sendTelegramNotification(telegramMessage);
       }
     } catch (error: any) {
       setAiStatus(null);

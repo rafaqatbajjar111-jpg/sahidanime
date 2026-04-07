@@ -13,6 +13,7 @@ import { useLocation } from 'react-router-dom';
 import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
 import { analyzePaymentScreenshot } from '../services/aiService';
 import { getSubscriptionExpiration } from '../lib/subscriptionUtils';
+import { sendTelegramNotification } from '../services/telegramService';
 import { toast } from 'react-hot-toast';
 import { chatWithAI, ChatMessage } from '../services/aiService';
 
@@ -295,6 +296,10 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             createdAt: serverTimestamp()
           });
 
+          // Telegram Notification
+          const telegramMessage = `🚀 *AI CHATBOT APPROVED*\n\n✅ *User:* ${userData.name || 'Anonymous'}\n📧 *Email:* ${userData.email}\n📦 *Plan:* ${matchingPlan.name}\n💰 *Amount:* ${price.symbol}${price.amount}\n🌍 *Country:* ${countryCode}\n✨ *Status:* Activated via Chatbot\n🆔 *UTR:* ${aiResult.utr || 'N/A'}`;
+          await sendTelegramNotification(telegramMessage);
+
           setMessages(prev => [...prev, { 
             role: 'bot', 
             content: `✅ **Payment Verified!**\n\nAapka **${matchingPlan.name}** plan activate ho gaya hai. Enjoy ad-free anime!\n\n**Details:**\n- Total Paid: ₹${totalPaidSoFar}\n- Recipient: ${aiResult.recipient}\n- UTR: ${aiResult.utr}` 
@@ -334,11 +339,19 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             createdAt: serverTimestamp()
           });
 
+          // Telegram Notification
+          const telegramMessage = `⚠️ *AI CHATBOT PARTIAL*\n\n👤 *User:* ${userData.name || 'Anonymous'}\n💰 *Paid:* ${paid}\n📉 *Total Paid:* ${totalPaidSoFar}\n🆔 *UTR:* ${aiResult.utr || 'N/A'}`;
+          await sendTelegramNotification(telegramMessage);
+
           setMessages(prev => [...prev, { 
             role: 'bot', 
             content: `Aapne **₹${paid}** bheje hain. Kya ye galti se kam amount bheja hai?\n\nHamare plans ye hain:\n${plansList}\n\nAap kaunsa plan lena chahte hain?` 
           }]);
         } else {
+          // Telegram Notification for Rejection
+          const telegramMessage = `❌ *AI CHATBOT REJECTED*\n\n👤 *User:* ${userData.name || 'Anonymous'}\n📧 *Email:* ${userData.email}\n🆔 *UTR:* ${aiResult.utr || 'N/A'}\n⚠️ *Reason:* ${aiResult.reason || 'Invalid screenshot'}`;
+          await sendTelegramNotification(telegramMessage);
+
           setMessages(prev => [...prev, { 
             role: 'bot', 
             content: `❌ **Verification Failed**\n\nReason: ${aiResult.reason || 'Invalid screenshot'}. Please try again with a clear photo.` 

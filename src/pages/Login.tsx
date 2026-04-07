@@ -11,6 +11,7 @@ import { auth, db } from '../firebase/firebase';
 import { Mail, Lock, User, Globe, ArrowRight, Loader2, Chrome } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import { sendTelegramNotification } from '../services/telegramService';
 
 const COUNTRIES = ['India', 'Pakistan', 'Bangladesh', 'Other'];
 
@@ -49,7 +50,7 @@ export const Login: React.FC = () => {
       // Check if user exists in Firestore
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       if (!userDoc.exists()) {
-        await setDoc(doc(db, 'users', user.uid), {
+        const newUser = {
           uid: user.uid,
           name: user.displayName || 'User',
           email: user.email,
@@ -58,7 +59,11 @@ export const Login: React.FC = () => {
           subscription_status: 'none',
           country: 'India', // Default for Google sign-in
           createdAt: new Date().toISOString()
-        });
+        };
+        await setDoc(doc(db, 'users', user.uid), newUser);
+        
+        // Telegram Notification for New User
+        await sendTelegramNotification(`🆕 *NEW USER (GOOGLE)*\n\n👤 *Name:* ${newUser.name}\n📧 *Email:* ${newUser.email}\n🌍 *Country:* ${newUser.country}`);
       }
       toast.success('Signed in with Google!');
       navigate('/');
@@ -80,7 +85,7 @@ export const Login: React.FC = () => {
       } else {
         const { user } = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
         
-        await setDoc(doc(db, 'users', user.uid), {
+        const newUser = {
           uid: user.uid,
           name: formData.name,
           email: formData.email,
@@ -89,7 +94,13 @@ export const Login: React.FC = () => {
           subscription_status: 'none',
           country: formData.country,
           createdAt: new Date().toISOString()
-        });
+        };
+        
+        await setDoc(doc(db, 'users', user.uid), newUser);
+        
+        // Telegram Notification for New User
+        await sendTelegramNotification(`🆕 *NEW USER (EMAIL)*\n\n👤 *Name:* ${newUser.name}\n📧 *Email:* ${newUser.email}\n🌍 *Country:* ${newUser.country}`);
+        
         toast.success('Account created successfully!');
       }
       navigate('/');

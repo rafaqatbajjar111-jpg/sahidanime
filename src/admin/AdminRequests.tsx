@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { usePlans } from '../hooks/usePlans';
 import { getSubscriptionExpiration } from '../lib/subscriptionUtils';
 import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
+import { sendTelegramNotification } from '../services/telegramService';
 
 interface Request {
   id: string;
@@ -73,6 +74,10 @@ export const AdminRequests: React.FC = () => {
         subscription_updated_at: serverTimestamp(),
         subscription_expiry: action === 'approved' ? expirationDate : null
       });
+
+      // Telegram Notification for Admin Action
+      const telegramMessage = `${action === 'approved' ? '✅' : '❌'} *ADMIN ${action.toUpperCase()}*\n\n👤 *User:* ${request.userName}\n📧 *Email:* ${request.userEmail || 'N/A'}\n📦 *Plan:* ${request.planName}\n🆔 *UTR:* ${request.transactionId}\n👮 *Admin:* ${userData?.name || 'Admin'}`;
+      await sendTelegramNotification(telegramMessage);
 
       toast.success(`Request ${action} successfully!`);
     } catch (error: any) {
