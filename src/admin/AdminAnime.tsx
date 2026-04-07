@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { collection, addDoc, serverTimestamp, doc, setDoc, getDocs, query, orderBy, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, setDoc, getDocs, query, orderBy, deleteDoc, updateDoc, limit } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase/firebase';
 import { useAnime } from '../context/AnimeContext';
 import { Plus, Trash2, Edit2, Upload, Loader2, Film, ListPlus, X, Check, ChevronRight } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import { cn } from '../lib/utils';
+import { cn, formatDailymotionUrl } from '../lib/utils';
 import { notifyAllUsers } from '../services/notificationService';
 
 export const AdminAnime: React.FC = () => {
@@ -32,21 +32,6 @@ export const AdminAnime: React.FC = () => {
     accessType: 'free' as 'free' | 'premium' | 'locked',
     order: 1
   });
-
-  const formatDailymotionUrl = (url: string) => {
-    if (!url) return url;
-    
-    // Match normal dailymotion video link: https://www.dailymotion.com/video/k5Up5g2jnKrBdJFfjMQ
-    const dailymotionRegex = /dailymotion\.com\/video\/([a-zA-Z0-9]+)/;
-    const match = url.match(dailymotionRegex);
-    
-    if (match && match[1]) {
-      const videoCode = match[1];
-      return `https://geo.dailymotion.com/player.html?video=${videoCode}&autoplay=true&mute=false`;
-    }
-    
-    return url;
-  };
 
   const handleAddAnime = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,11 +121,32 @@ export const AdminAnime: React.FC = () => {
       const q = query(collection(db, 'anime', animeId, 'episodes'));
       const querySnapshot = await getDocs(q);
       const eps = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // Sort client-side to handle missing order
-      setAnimeEpisodes(eps.sort((a: any, b: any) => (a.order || 0) - (b.order || 0)));
+      // Sort client-side to handle missing order: Latest (highest order) first
+      setAnimeEpisodes(eps.sort((a: any, b: any) => Number(b.order || 0) - Number(a.order || 0)));
       setShowEpisodeList(animeId);
     } catch (error: any) {
       toast.error('Failed to fetch episodes');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openAddEpisode = async (animeId: string) => {
+    setLoading(true);
+    try {
+      const q = query(collection(db, 'anime', animeId, 'episodes'), orderBy('order', 'desc'), limit(1));
+      const querySnapshot = await getDocs(q);
+      let nextOrder = 1;
+      if (!querySnapshot.empty) {
+        const lastEp = querySnapshot.docs[0].data();
+        nextOrder = (lastEp.order || 0) + 1;
+      }
+      setEpData({ title: '', videoUrl: '', downloadUrl: '', accessType: 'free', order: nextOrder });
+      setShowEpisodeModal(animeId);
+    } catch (error) {
+      console.error("Error fetching last episode order:", error);
+      setEpData({ title: '', videoUrl: '', downloadUrl: '', accessType: 'free', order: 1 });
+      setShowEpisodeModal(animeId);
     } finally {
       setLoading(false);
     }
@@ -164,6 +170,8 @@ export const AdminAnime: React.FC = () => {
           ...finalEpData,
           updatedAt: serverTimestamp()
         });
+        // Update parent anime's updatedAt to bring it to top of dashboard
+        await updateDoc(doc(db, 'anime', showEpisodeModal), { updatedAt: serverTimestamp() });
         toast.success('Episode updated!');
       } else {
         await addDoc(collection(db, 'anime', showEpisodeModal, 'episodes'), {
@@ -171,6 +179,8 @@ export const AdminAnime: React.FC = () => {
           animeId: showEpisodeModal,
           createdAt: serverTimestamp()
         });
+        // Update parent anime's updatedAt to bring it to top of dashboard
+        await updateDoc(doc(db, 'anime', showEpisodeModal), { updatedAt: serverTimestamp() });
         toast.success('Episode added!');
       }
       
@@ -258,7 +268,7 @@ export const AdminAnime: React.FC = () => {
               </div>
               <div className="flex flex-wrap gap-2">
                 <button 
-                  onClick={() => setShowEpisodeModal(anime.id)}
+                  onClick={() => openAddEpisode(anime.id)}
                   className="flex-1 bg-blue-600/10 hover:bg-blue-600 text-blue-500 hover:text-white py-2 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1"
                 >
                   <ListPlus className="w-3 h-3" /> Add Ep

@@ -35,15 +35,13 @@ export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!isAuthReady) return;
-
     const animeQuery = query(collection(db, 'anime'));
     const unsubAnime = onSnapshot(animeQuery, (snapshot) => {
       const animeList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Anime));
-      // Sort client-side to handle missing createdAt or order
+      // Sort client-side to handle missing createdAt or updatedAt
       setAnimes(animeList.sort((a, b) => {
-        const dateA = a.createdAt?.seconds || 0;
-        const dateB = b.createdAt?.seconds || 0;
+        const dateA = (a as any).updatedAt?.seconds || a.createdAt?.seconds || 0;
+        const dateB = (b as any).updatedAt?.seconds || b.createdAt?.seconds || 0;
         return dateB - dateA;
       }));
       setLoading(false);
@@ -58,7 +56,7 @@ export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => {
       unsubAnime();
     };
-  }, [isAuthReady]);
+  }, []);
 
   return (
     <AnimeContext.Provider value={{ animes, loading }}>

@@ -22,6 +22,7 @@ import { AdminRequests } from './admin/AdminRequests';
 import { AdminUsers } from './admin/AdminUsers';
 import { AdminSettings } from './admin/AdminSettings';
 import { AdminRedeemCodes } from './admin/AdminRedeemCodes';
+import { AdminAIAgent } from './admin/AdminAIAgent';
 import { RedeemCode } from './pages/RedeemCode';
 import { PrivacyPolicy } from './pages/policies/PrivacyPolicy';
 import { TermsConditions } from './pages/policies/TermsConditions';
@@ -159,6 +160,14 @@ export default function App() {
               <ProtectedRoute requireAdmin>
                 <Layout>
                   <AdminRedeemCodes />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/admin/agent" element={
+              <ProtectedRoute requireAdmin>
+                <Layout>
+                  <AdminAIAgent />
                 </Layout>
               </ProtectedRoute>
             } />

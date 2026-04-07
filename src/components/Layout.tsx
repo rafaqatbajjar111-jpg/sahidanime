@@ -13,7 +13,8 @@ import {
   ChevronDown,
   Settings,
   ShieldCheck,
-  Users
+  Users,
+  Bot
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -72,99 +73,110 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   if (isAdminUser) {
     navItems.push({ name: 'Admin Panel', icon: LayoutDashboard, path: '/admin' });
     navItems.push({ name: 'Users', icon: Users, path: '/admin/users' });
+    navItems.push({ name: 'AI Agent', icon: Bot, path: '/admin/agent' });
     navItems.push({ name: 'Settings', icon: Settings, path: '/admin/settings' });
   }
 
   return (
     <div className={cn(
-      "min-h-screen flex transition-colors duration-300",
-      theme === 'dark' ? "bg-black text-white" : "bg-white text-zinc-900"
+      "min-h-screen flex transition-colors duration-500",
+      theme === 'dark' ? "bg-black text-white" : "bg-zinc-50 text-zinc-900"
     )}>
       <GlobalAds />
       {/* Sidebar - Desktop */}
       <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 w-64 border-r transition-transform duration-300 lg:translate-x-0",
-        theme === 'dark' ? "bg-zinc-900 border-zinc-800" : "bg-zinc-50 border-zinc-200",
+        "fixed inset-y-0 left-0 z-50 w-72 border-r transition-all duration-500 lg:translate-x-0",
+        theme === 'dark' ? "bg-zinc-950 border-zinc-900 shadow-[20px_0_50px_-20px_rgba(0,0,0,0.5)]" : "bg-white border-zinc-200 shadow-[20px_0_50px_-20px_rgba(0,0,0,0.05)]",
         isSidebarOpen ? "translate-x-0" : "-translate-x-full"
       )}>
-        <div className="h-full flex flex-col p-4">
-          <Link to="/" className="flex items-center gap-3 mb-8 group">
-            <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-blue-500/50 shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">
+        <div className="h-full flex flex-col p-6">
+          <Link to="/" className="flex items-center gap-4 mb-10 group">
+            <div className="w-12 h-12 rounded-2xl overflow-hidden border-2 border-blue-500 shadow-2xl shadow-blue-500/20 group-hover:rotate-6 transition-all duration-500">
               <img 
                 src="https://i.ibb.co/r2BqPyM1/IMG-20260406-235046-639.jpg" 
                 alt="sahidanime logo" 
                 className="w-full h-full object-cover"
               />
             </div>
-            <span className={cn(
-              "text-lg font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r",
-              theme === 'dark' ? "from-white to-zinc-400" : "from-zinc-900 to-zinc-600"
-            )}>
-              sahidanime
-            </span>
+            <div className="flex flex-col">
+              <span className={cn(
+                "text-xl font-black tracking-tighter leading-none",
+                theme === 'dark' ? "text-white" : "text-zinc-900"
+              )}>
+                SAHID<span className="text-blue-500">ANIME</span>
+              </span>
+              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Premium Streaming</span>
+            </div>
           </Link>
 
-          <nav className="flex-1 space-y-1">
+          <nav className="flex-1 space-y-2">
+            <div className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 ml-3">Menu</div>
             {navItems.map((item) => (
               <Link
                 key={item.name}
                 to={item.path}
                 onClick={() => setIsSidebarOpen(false)}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 group",
+                  "flex items-center gap-4 px-4 py-3 rounded-2xl transition-all duration-300 group relative overflow-hidden",
                   location.pathname === item.path 
-                    ? "bg-blue-500/10 text-blue-500" 
+                    ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" 
                     : theme === 'dark'
-                      ? "text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                      ? "text-zinc-400 hover:bg-zinc-900 hover:text-white"
                       : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
                 )}
               >
                 <item.icon className={cn(
-                  "w-4 h-4",
-                  location.pathname === item.path ? "text-blue-500" : theme === 'dark' ? "group-hover:text-white" : "group-hover:text-zinc-900"
+                  "w-5 h-5 transition-transform duration-300 group-hover:scale-110",
+                  location.pathname === item.path ? "text-white" : theme === 'dark' ? "group-hover:text-blue-500" : "group-hover:text-blue-600"
                 )} />
-                <span className="font-medium text-sm">{item.name}</span>
+                <span className="font-black text-sm tracking-tight">{item.name}</span>
+                {location.pathname === item.path && (
+                  <motion.div 
+                    layoutId="activeNav"
+                    className="absolute left-0 w-1 h-6 bg-white rounded-full"
+                  />
+                )}
               </Link>
             ))}
           </nav>
 
           <div className={cn(
-            "pt-4 border-t",
-            theme === 'dark' ? "border-zinc-800" : "border-zinc-200"
+            "pt-6 border-t mt-6",
+            theme === 'dark' ? "border-zinc-900" : "border-zinc-200"
           )}>
             {user && (
               <Link 
                 to="/redeem"
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2 w-full rounded-lg transition-all duration-200 mb-1",
+                  "flex items-center gap-4 px-4 py-3 w-full rounded-2xl transition-all duration-300 mb-2 group",
                   theme === 'dark' ? "text-zinc-400 hover:bg-blue-500/10 hover:text-blue-500" : "text-zinc-500 hover:bg-blue-500/10 hover:text-blue-500"
                 )}
               >
-                <Ticket className="w-4 h-4" />
-                <span className="font-medium text-sm">Redeem Code</span>
+                <Ticket className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+                <span className="font-black text-sm tracking-tight">Redeem Code</span>
               </Link>
             )}
             {user ? (
               <button 
                 onClick={handleLogout}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2 w-full rounded-lg transition-all duration-200",
+                  "flex items-center gap-4 px-4 py-3 w-full rounded-2xl transition-all duration-300 group",
                   theme === 'dark' ? "text-zinc-400 hover:bg-red-500/10 hover:text-red-500" : "text-zinc-500 hover:bg-red-500/10 hover:text-red-500"
                 )}
               >
-                <LogOut className="w-4 h-4" />
-                <span className="font-medium text-sm">Logout</span>
+                <LogOut className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+                <span className="font-black text-sm tracking-tight">Logout</span>
               </button>
             ) : (
               <Link 
                 to="/login"
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2 w-full rounded-lg transition-all duration-200",
+                  "flex items-center gap-4 px-4 py-3 w-full rounded-2xl transition-all duration-300 group",
                   theme === 'dark' ? "text-zinc-400 hover:bg-blue-500/10 hover:text-blue-500" : "text-zinc-500 hover:bg-blue-500/10 hover:text-blue-500"
                 )}
               >
-                <User className="w-4 h-4" />
-                <span className="font-medium text-sm">Sign In</span>
+                <User className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                <span className="font-black text-sm tracking-tight">Sign In</span>
               </Link>
             )}
           </div>
@@ -172,58 +184,55 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 lg:ml-64 min-h-screen flex flex-col">
+      <main className="flex-1 lg:ml-72 min-h-screen flex flex-col">
         {/* Topbar */}
         <header className={cn(
-          "sticky top-0 z-40 h-16 backdrop-blur-md border-b px-4 lg:px-6 flex items-center justify-between transition-colors",
-          theme === 'dark' ? "bg-black/80 border-zinc-800" : "bg-white/80 border-zinc-200"
+          "sticky top-0 z-40 h-20 backdrop-blur-xl border-b px-6 lg:px-10 flex items-center justify-between transition-all duration-500",
+          theme === 'dark' ? "bg-black/60 border-zinc-900" : "bg-white/60 border-zinc-200"
         )}>
           <button 
             onClick={() => setIsSidebarOpen(true)}
             className="lg:hidden p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
           >
-            <Menu className="w-5 h-5" />
+            <Menu className="w-6 h-6" />
           </button>
 
-          <div className="flex-1 max-w-xl mx-4 hidden md:block">
+          <div className="flex-1 max-w-2xl mx-8 hidden md:block">
             <div className="relative group">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 group-focus-within:text-blue-500 transition-colors" />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:text-blue-500 transition-colors" />
               <input 
                 type="text" 
-                placeholder="Search anime, movies..."
+                placeholder="Search your favorite anime..."
                 className={cn(
-                  "w-full border rounded-full py-1.5 pl-9 pr-4 text-xs focus:outline-none focus:border-blue-500 transition-all",
+                  "w-full border-2 rounded-2xl py-2.5 pl-12 pr-6 text-sm font-bold focus:outline-none focus:border-blue-500 transition-all shadow-sm",
                   theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-zinc-100 border-zinc-200 text-zinc-900"
                 )}
               />
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
             <button 
               onClick={toggleTheme}
               className={cn(
-                "p-1.5 transition-colors",
-                theme === 'dark' ? "text-zinc-400 hover:text-white" : "text-zinc-500 hover:text-zinc-900"
+                "p-2.5 rounded-xl transition-all hover:scale-110 active:scale-95",
+                theme === 'dark' ? "bg-zinc-900 text-yellow-500" : "bg-zinc-100 text-blue-600"
               )}
             >
-              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
 
             <div className="relative">
               <button 
                 onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
                 className={cn(
-                  "p-1.5 relative transition-colors",
-                  theme === 'dark' ? "text-zinc-400 hover:text-white" : "text-zinc-500 hover:text-zinc-900"
+                  "p-2.5 rounded-xl relative transition-all hover:scale-110 active:scale-95",
+                  theme === 'dark' ? "bg-zinc-900 text-zinc-400 hover:text-white" : "bg-zinc-100 text-zinc-500 hover:text-zinc-900"
                 )}
               >
-                <Bell className="w-4 h-4" />
+                <Bell className="w-5 h-5" />
                 {hasUnread && (
-                  <span className={cn(
-                    "absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-blue-500 rounded-full border",
-                    theme === 'dark' ? "border-black" : "border-white"
-                  )} />
+                  <span className="absolute top-2.5 right-2.5 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-white dark:border-zinc-900 animate-pulse" />
                 )}
               </button>
 

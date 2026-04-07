@@ -128,8 +128,8 @@ export const AnimeDetails: React.FC = () => {
     const q = query(collection(db, 'anime', id, 'episodes'));
     const unsub = onSnapshot(q, (snapshot) => {
       const epList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Episode));
-      // Sort client-side to handle missing order
-      setEpisodes(epList.sort((a, b) => (a.order || 0) - (b.order || 0)));
+      // Sort client-side to handle missing order: Latest (highest order) first
+      setEpisodes(epList.sort((a, b) => Number(b.order || 0) - Number(a.order || 0)));
       setLoading(false);
     }, (error: any) => {
       handleFirestoreError(error, OperationType.LIST, `anime/${id}/episodes`);
