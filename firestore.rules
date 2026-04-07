@@ -18,7 +18,7 @@ service cloud.firestore {
     // Fields: name, price, duration, benefits
     //
     // Collection: purchaseRequests
-    // Fields: userId, userName, planId, planName, status, createdAt
+    // Fields: userId, userName, userEmail, planId, planName, amount, paidAmount, remainingAmount, totalPaidSoFar, recipient, currency, country, transactionId, utr, battery, screenshot, status, aiReason, createdAt
     //
     // Collection: redeemCodes
     // Fields: code, planId, planName, maxUses, usedCount, usedBy, createdAt
@@ -43,8 +43,7 @@ service cloud.firestore {
 
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'email', 'role', 'country']) &&
-             data.role in ['user', 'admin'] &&
-             data.subscription_status in ['active', 'pending', 'rejected', 'none'];
+             data.role in ['user', 'admin'];
     }
 
     // Rules
@@ -58,9 +57,12 @@ service cloud.firestore {
         request.resource.data.uid == resource.data.uid &&
         (
           // Allow owner to update subscription if using a coupon or AI auto-approval
-          ((request.resource.data.get('subscription_method', '') == 'coupon' || request.resource.data.get('subscription_method', '') == 'ai_auto') && 
-           request.resource.data.get('subscription_status', '') == 'active' &&
-           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['subscription_plan', 'subscription_status', 'subscription_method', 'subscription_updated_at', 'subscription_expiry'])) ||
+          ((request.resource.data.get('subscription_method', '') == 'coupon' || 
+            request.resource.data.get('subscription_method', '') == 'ai_auto' ||
+            request.resource.data.get('subscription_method', '') == 'ai_chatbot') && 
+           request.resource.data.get('subscription_status', '') == 'active') ||
+          // Allow owner to update pending_payment for partial payments
+          (request.resource.data.diff(resource.data).affectedKeys().hasAny(['pending_payment'])) ||
           // Otherwise, subscription fields must remain unchanged
           (request.resource.data.get('subscription_status', '') == resource.data.get('subscription_status', '') &&
            request.resource.data.get('subscription_plan', '') == resource.data.get('subscription_plan', ''))
@@ -101,7 +103,7 @@ service cloud.firestore {
     }
 
     match /purchaseRequests/{requestId} {
-      allow read: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.userId);
+      allow read: if isAuthenticated(); // Allow all authenticated users to read/list for duplicate checks
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       allow update: if isAdmin();
     }
@@ -122,7 +124,8 @@ service cloud.firestore {
     }
 
     match /settings/telegram {
-      allow read, write: if isAdmin();
+      allow get: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
     match /test/{docId} {

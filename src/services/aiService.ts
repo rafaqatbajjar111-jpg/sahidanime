@@ -53,8 +53,14 @@ export const analyzePaymentScreenshot = async (base64Image: string, planDetails:
   }
 
   const recipientsList = validRecipients.join(", ");
+  const currentDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
+  const currentTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+
   const prompt = `
     You are an automated payment verification agent for SahidAnime.
+    Today's Date: ${currentDate}
+    Current Time: ${currentTime}
+
     Your task is to analyze the provided payment screenshot and determine if it is a valid, real payment.
     The user is interested in one of these plans:
     ${planDetails}
@@ -63,7 +69,10 @@ export const analyzePaymentScreenshot = async (base64Image: string, planDetails:
     1. **Amount Detection**: Extract the exact amount paid from the screenshot.
     2. **Recipient Match**: The recipient MUST be one of these: ${recipientsList}.
     3. **Transaction Status**: Must be "Success", "Completed", or "Successful".
-    4. **Date Check**: The transaction date must be recent (today or yesterday).
+    4. **Date Check**: The transaction date must be recent. Today is ${currentDate}.
+       - Accept dates that are Today (${currentDate}) or Yesterday.
+       - If the screenshot shows a date that matches ${currentDate}, it is NOT a future date. It is TODAY.
+       - Be lenient with timezones; if the time in the screenshot is slightly ahead of ${currentTime}, it might be due to a different timezone setting on the user's phone. Do not reject solely on a few hours difference unless it's a completely different day in the future.
     5. **Authenticity**: Check for signs of editing, fake fonts, or reused screenshots.
     6. **Metadata Extraction**: Extract:
        - **status**: "APPROVED" (if it matches one of the plan prices exactly), "PARTIAL" (if it's less than a plan price), or "REJECTED" (invalid).
@@ -79,10 +88,11 @@ export const analyzePaymentScreenshot = async (base64Image: string, planDetails:
       "battery": "extracted_battery_percentage_or_null",
       "amount": number,
       "recipient": "extracted_name",
-      "reason": "Reason if REJECTED or PARTIAL (in Hindi/English)"
+      "reason": "Reason if REJECTED or PARTIAL (in Hinglish style - Hindi/English mix)"
     }
     
     Example for PARTIAL: { "status": "PARTIAL", "amount": 45, "reason": "Aapne 45 rupaye bheje hain, 5 rupaye aur bhej kar activate karein." }
+    Example for REJECTED: { "status": "REJECTED", "reason": "Ye screenshot clear nahi hai ya purana hai. Please naya screenshot bhejein." }
     
     Be extremely strict. If you are unsure, REJECT.
   `;

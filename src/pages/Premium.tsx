@@ -85,17 +85,6 @@ export const Premium: React.FC = () => {
       // Add defaults just in case
       validRecipients.push("Sahid Anime 4 You", "SK HAMJA", "btthhindidubmasala@okicici");
 
-      // 1. Duplicate Detection
-      const q = query(collection(db, 'purchaseRequests'), where('screenshot', '==', screenshot));
-      const duplicateSnapshot = await getDocs(q);
-      if (!duplicateSnapshot.empty) {
-        setVerificationStatus('fail');
-        setFailReason('This screenshot has already been used. Please provide a fresh payment proof.');
-        setAiStatus(null);
-        toast.error('Duplicate screenshot detected!');
-        return;
-      }
-
       // 2. AI Analysis
       const aiResponse = await analyzePaymentScreenshot(screenshot, planDetails, validRecipients);
       let aiResult;
@@ -107,6 +96,23 @@ export const Premium: React.FC = () => {
         if (aiResponse.includes('APPROVED')) aiResult = { status: 'APPROVED' };
         else if (aiResponse.includes('PARTIAL')) aiResult = { status: 'PARTIAL', reason: aiResponse };
         else aiResult = { status: 'REJECTED', reason: aiResponse };
+      }
+
+      // 3. Duplicate Detection by UTR (Very Important!)
+      if (aiResult.utr) {
+        try {
+          const q = query(collection(db, 'purchaseRequests'), where('utr', '==', aiResult.utr));
+          const duplicateSnapshot = await getDocs(q);
+          if (!duplicateSnapshot.empty) {
+            setVerificationStatus('fail');
+            setFailReason('This Transaction ID (UTR) has already been used to activate a plan. Please provide a fresh payment.');
+            setAiStatus(null);
+            toast.error('Duplicate Transaction ID detected!');
+            return;
+          }
+        } catch (e) {
+          console.warn('Duplicate UTR check failed, skipping...', e);
+        }
       }
       
       if (aiResult.status === 'APPROVED') {
@@ -161,11 +167,6 @@ export const Premium: React.FC = () => {
         const total = Number(planPrice.amount);
         const remaining = total - paid;
 
-        setVerificationStatus('fail');
-        setFailReason(`Aapne ${paid} rupaye bheje hain. ${remaining} rupaye aur bhej kar activate karein.`);
-        setAiStatus(null);
-        toast.error(`Partial Payment: ${paid} received. ${remaining} remaining.`);
-
         // Save Pending Payment in User Doc
         await updateDoc(doc(db, 'users', user.uid), {
           pending_payment: {
@@ -193,7 +194,7 @@ export const Premium: React.FC = () => {
           transactionId: aiResult.utr || 'PARTIAL_PAYMENT',
           utr: aiResult.utr || null,
           battery: aiResult.battery || null,
-          screenshot: null, // DELETE PHOTO AS REQUESTED
+          screenshot: null, 
           status: 'partial',
           aiReason: aiResult.reason,
           createdAt: serverTimestamp()
@@ -202,6 +203,16 @@ export const Premium: React.FC = () => {
         // Telegram Notification
         const telegramMessage = `⚠️ *AI PARTIAL PAYMENT*\n\n👤 *User:* ${userData.name || 'Anonymous'}\n💰 *Paid:* ${paid}\n📉 *Remaining:* ${remaining}\n📦 *Plan:* ${selectedPlan.name}\n👤 *Recipient:* ${aiResult.recipient || 'SK HAMJA'}`;
         await sendTelegramNotification(telegramMessage);
+
+        toast.success(`Partial Payment: ${paid} received. Redirecting to Chatbot for help...`);
+        
+        // Redirect to Chatbot
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('open-chatbot'));
+          setVerificationStatus('idle');
+          setSelectedPlan(null);
+          setScreenshot(null);
+        }, 2000);
 
       } else {
         setVerificationStatus('fail');

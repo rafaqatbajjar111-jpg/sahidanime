@@ -47,9 +47,17 @@ export const FloatingSupport: React.FC = () => {
       handleFirestoreError(error, OperationType.GET, 'settings/chatbot');
     });
 
+    const handleOpenChatbot = () => {
+      setIsChatOpen(true);
+      setIsOpen(false);
+    };
+
+    window.addEventListener('open-chatbot', handleOpenChatbot);
+
     return () => {
       unsubSupport();
       unsubChatbot();
+      window.removeEventListener('open-chatbot', handleOpenChatbot);
     };
   }, []);
 

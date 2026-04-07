@@ -71,34 +71,35 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'settings', 'chatbot'), (doc) => {
       if (doc.exists()) {
-        const data = doc.data() as ChatbotConfig;
-        setConfig(data);
-        if (messages.length === 0) {
-          setMessages([{ 
-            role: 'bot', 
-            content: `Assalamu alaikum! I am your ${data.botName}. How can I help you today?` 
-          }]);
-        }
+        setConfig(doc.data() as ChatbotConfig);
       } else {
-        // Fallback if no config exists
-        const fallbackName = 'SahidAnime Assistant';
         setConfig({
           enabled: true,
-          botName: fallbackName,
-          systemPrompt: 'You are a helpful assistant for SahidAnime.'
+          botName: 'SahidAnime Assistant',
+          systemPrompt: 'You are the official SahidAnime Assistant with full control and knowledge of the website. You know all the plans, payment methods, and user subscription statuses. Reply in "Hinglish" style (Indian Hindi-English mix). Aapko website ke saare plans aur user ki current halat (subscription, pending payments) ka pura pata hai. Be friendly, helpful, and act like you have the authority to guide users through any issue.'
         });
-        if (messages.length === 0) {
-          setMessages([{ 
-            role: 'bot', 
-            content: `Assalamu alaikum! I am your ${fallbackName}. How can I help you today?` 
-          }]);
-        }
       }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'settings/chatbot');
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (config && messages.length === 0) {
+      let initialMessage = `Assalamu alaikum! Main aapka ${config.botName} hoon. Aaj main aapki kaise help kar sakta hoon?`;
+      
+      if (userData?.pending_payment) {
+        const { paidAmount, planName, remainingAmount } = userData.pending_payment;
+        initialMessage = `Assalamu alaikum! Aapne pehle **₹${paidAmount}** pay kiye hain. **${planName}** activate karne ke liye aapko **₹${remainingAmount || 'kuch'}** aur pay karne honge. Aap screenshot yahan upload kar sakte hain!`;
+      }
+
+      setMessages([{ 
+        role: 'bot', 
+        content: initialMessage
+      }]);
+    }
+  }, [config, userData, messages.length]);
 
   const chatWithAI = async (messages: ChatMessage[]) => {
     const apiKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -223,15 +224,7 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         // Add defaults
         validRecipients.push("Sahid Anime 4 You", "SK HAMJA", "btthhindidubmasala@okicici");
 
-        // 2. Duplicate Detection
-        const q = query(collection(db, 'purchaseRequests'), where('screenshot', '==', base64String));
-        const duplicateSnapshot = await getDocs(q);
-        if (!duplicateSnapshot.empty) {
-          setMessages(prev => [...prev, { role: 'bot', content: "❌ This screenshot has already been used. Please provide a fresh payment proof." }]);
-          return;
-        }
-
-        // 3. AI Analysis
+        // 2. AI Analysis
         const aiResponse = await analyzePaymentScreenshot(base64String, planDetails, validRecipients);
         let aiResult;
         try {
@@ -241,6 +234,23 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           if (aiResponse.includes('APPROVED')) aiResult = { status: 'APPROVED' };
           else if (aiResponse.includes('PARTIAL')) aiResult = { status: 'PARTIAL', reason: aiResponse };
           else aiResult = { status: 'REJECTED', reason: aiResponse };
+        }
+
+        // 3. Duplicate Detection by UTR (Very Important!)
+        if (aiResult.utr) {
+          try {
+            const q = query(collection(db, 'purchaseRequests'), where('utr', '==', aiResult.utr));
+            const duplicateSnapshot = await getDocs(q);
+            if (!duplicateSnapshot.empty) {
+              setMessages(prev => [...prev, { 
+                role: 'bot', 
+                content: "❌ Ye Transaction ID (UTR) pehle hi use ho chuka hai. Please naya payment screenshot bhejein." 
+              }]);
+              return;
+            }
+          } catch (e) {
+            console.warn('Duplicate UTR check failed, skipping...', e);
+          }
         }
 
         const paid = Number(aiResult.amount) || 0;
@@ -287,7 +297,7 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
           setMessages(prev => [...prev, { 
             role: 'bot', 
-            content: `✅ **Payment Verified!**\n\nYour **${matchingPlan.name}** plan is now active. Enjoy ad-free anime!\n\n**Details:**\n- Total Paid: ${totalPaidSoFar}\n- Recipient: ${aiResult.recipient}\n- UTR: ${aiResult.utr}` 
+            content: `✅ **Payment Verified!**\n\nAapka **${matchingPlan.name}** plan activate ho gaya hai. Enjoy ad-free anime!\n\n**Details:**\n- Total Paid: ₹${totalPaidSoFar}\n- Recipient: ${aiResult.recipient}\n- UTR: ${aiResult.utr}` 
           }]);
         } else if (paid > 0 && aiResult.status !== 'REJECTED') {
           // It's a partial payment or we don't know the plan yet
@@ -301,6 +311,7 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           await updateDoc(doc(db, 'users', user.uid), {
             pending_payment: {
               paidAmount: totalPaidSoFar,
+              currency: 'INR', // Default to INR as per user context
               timestamp: new Date().toISOString()
             }
           });
@@ -314,7 +325,7 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             paidAmount: paid,
             totalPaidSoFar: totalPaidSoFar,
             recipient: aiResult.recipient || 'SK HAMJA',
-            currency: 'INR', // Default to INR for now as per user request context
+            currency: 'INR',
             country: countryCode,
             transactionId: aiResult.utr || 'PARTIAL_CHATBOT',
             utr: aiResult.utr || null,
@@ -325,7 +336,7 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
           setMessages(prev => [...prev, { 
             role: 'bot', 
-            content: `Aapne **${paid}** rupaye bheje hain. Kya ye galti se kam amount bheja hai?\n\nHamare plans ye hain:\n${plansList}\n\nAap kaunsa plan lena chahte hain?` 
+            content: `Aapne **₹${paid}** bheje hain. Kya ye galti se kam amount bheja hai?\n\nHamare plans ye hain:\n${plansList}\n\nAap kaunsa plan lena chahte hain?` 
           }]);
         } else {
           setMessages(prev => [...prev, { 
@@ -358,11 +369,12 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         const searchTerm = userMessage.replace(/search|find/gi, '').trim();
         const results = await handleSearchAnime(searchTerm);
         if (results.length > 0) {
-          contextAddition = `\n\nContext: I found these anime in the database: ${results.map(r => r.title).join(', ')}. Mention them to the user.`;
+          contextAddition = `\n\nContext: I found these anime in the database: ${results.map(r => r.title).join(', ')}. Mention them to the user in Hinglish.`;
         }
       }
 
       const newHistory: ChatMessage[] = [
+        { role: 'system', content: config?.systemPrompt || 'You are a helpful assistant for SahidAnime. Reply in Hinglish.' },
         ...aiHistory,
         { role: 'user', content: userMessage + contextAddition }
       ];

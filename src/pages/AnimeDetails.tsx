@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { doc, getDoc, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
 import { VideoPlayer } from '../components/VideoPlayer';
@@ -30,6 +30,7 @@ interface Episode {
 
 export const AnimeDetails: React.FC = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { userData } = useAuth();
   const { plans, paymentMethods, loading: plansLoading } = usePlans();
   const { theme } = useTheme();
@@ -254,7 +255,7 @@ export const AnimeDetails: React.FC = () => {
       setShowPlayer(true);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else if (ep.accessType === 'premium') {
-      setShowPremiumModal(true);
+      navigate('/premium');
     } else {
       toast.error('This episode is currently locked');
     }
