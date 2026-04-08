@@ -17,12 +17,11 @@ const __dirname = path.dirname(__filename);
 const firebaseConfig = JSON.parse(fs.readFileSync("./firebase-applet-config.json", "utf-8"));
 
 // Initialize Firebase Admin
-// Note: In this environment, we might not have a service account file.
-// We'll try to initialize with the project ID.
 const adminApp = initializeApp({
   projectId: firebaseConfig.projectId,
 });
 
+// Use the specific database ID from config
 const db = getFirestore(adminApp, firebaseConfig.firestoreDatabaseId);
 
 async function startServer() {

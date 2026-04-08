@@ -65,16 +65,24 @@ export const analyzeImage = async (base64Image: string, planDetails: string, val
     
     1. If the image is a **Payment Screenshot** (UPI, Bank Transfer, etc.):
        - Extraction: Extract amount, UTR/Transaction ID, recipient name, and phone battery percentage.
-       - Verification: Check if it matches one of these plans: ${planDetails}.
+       - Verification: Check if it matches one of these plans: 
+         * Garib Pro Max: ₹50 (INR)
+         * VIP: ₹100 (INR)
+         * Yearly: ₹800 (INR)
+       - CRITICAL: If the amount is ₹50, it is ALWAYS for "Garib Pro Max". If ₹100, it is "VIP". If ₹800, it is "Yearly".
        - Recipient Match: The recipient MUST be one of these: ${recipientsList}.
        - Status: Must be "Success" or "Completed".
-       - Date Check: Must be Today (${currentDate}) or Yesterday.
+       - CRITICAL: DO NOT check the date or time. Many users send screenshots from earlier today or yesterday. ONLY verify the UTR/Transaction ID and the Recipient Name/UPI.
        - Respond with type: "PAYMENT".
        - If verified, tell them: "✅ Payment Verified! Aapka coupon code generate ho gaya hai. Isko redeem page par use karein: [Link to Redeem]"
 
     2. If the user says something like "Mujhe plan chahie", "I need a plan", "Plans dikhao", etc.:
-       - List all available plans from ${planDetails} in a clear, formatted way.
-       - Tell them to pay the exact amount to one of the UPI IDs and send the screenshot here.
+       - List all available plans ONLY in INR (₹):
+         * Garib Pro Max: ₹50
+         * VIP: ₹100
+         * Yearly: ₹800
+       - DO NOT mention Dollars ($) or any other currency unless specifically asked.
+       - Tell them to pay the exact amount in INR (₹) to one of the UPI IDs and send the screenshot here.
 
     3. If the image is **NOT a payment screenshot** (e.g., a selfie, a landscape, a meme, anime art, etc.):
        - Analyze what is in the image.
@@ -89,7 +97,7 @@ export const analyzeImage = async (base64Image: string, planDetails: string, val
         "battery": "extracted_battery_percentage_or_null",
         "amount": number,
         "recipient": "extracted_name",
-        "reason": "Reason if REJECTED or PARTIAL (in Hinglish style - Hindi/English mix)"
+        "reason": "Reason if REJECTED or PARTIAL (in Hinglish style - Hindi/English mix). Be clear that we only accept INR (₹)."
       },
       "generalInfo": {
         "description": "A brief description of what you see in the image (in Hinglish style)",
@@ -145,5 +153,41 @@ export const analyzeImage = async (base64Image: string, planDetails: string, val
   } catch (error: any) {
     console.error("AI Analysis Error:", error);
     throw new Error(`AI Analysis Error: ${error.message}`);
+  }
+};
+
+export const generateSpeech = async (text: string) => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.warn('GEMINI_API_KEY not found. TTS disabled.');
+    return null;
+  }
+
+  try {
+    // We use the @google/genai SDK pattern from the skill
+    const { GoogleGenAI, Modality } = await import("@google/genai");
+    const ai = new GoogleGenAI({ apiKey });
+    
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash-preview-tts",
+      contents: [{ parts: [{ text: `Say naturally in a friendly Hinglish tone: ${text}` }] }],
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: 'Kore' },
+          },
+        },
+      },
+    });
+
+    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (base64Audio) {
+      return `data:audio/wav;base64,${base64Audio}`;
+    }
+    return null;
+  } catch (error) {
+    console.error("TTS Generation Error:", error);
+    return null;
   }
 };

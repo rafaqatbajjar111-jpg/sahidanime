@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { collection, query, getDocs, limit, doc, onSnapshot, addDoc, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, Send, X, Bot, User, Loader2, Sparkles, Play, Search, List, ExternalLink, Image as ImageIcon, Upload, Trash2 } from 'lucide-react';
+import { MessageSquare, Send, X, Bot, User, Loader2, Sparkles, Play, Search, List, ExternalLink, Image as ImageIcon, Upload, Trash2, Mic, MicOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -11,12 +11,13 @@ import { usePlans } from '../hooks/usePlans';
 import { useAuth } from '../context/AuthContext';
 import { useLocation } from 'react-router-dom';
 import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
-import { analyzeImage } from '../services/aiService';
+import { analyzeImage, generateSpeech } from '../services/aiService';
 import { getSubscriptionExpiration } from '../lib/subscriptionUtils';
 import { sendTelegramNotification } from '../services/telegramService';
 import { toast } from 'react-hot-toast';
 import { chatWithAI, ChatMessage } from '../services/aiService';
 import { setDoc } from 'firebase/firestore';
+import { Volume2, VolumeX } from 'lucide-react';
 
 const generateRedeemCode = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -51,22 +52,28 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isLiveMode, setIsLiveMode] = useState(false);
+  const [autoSpeak, setAutoSpeak] = useState(true);
   const [lastInteraction, setLastInteraction] = useState(Date.now());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Keep track of raw messages for AI context
   const [aiHistory, setAiHistory] = useState<ChatMessage[]>([]);
+  const [isSpeaking, setIsSpeaking] = useState<number | null>(null);
+  const [isListening, setIsListening] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const recognitionRef = useRef<any>(null);
 
-  // Inactivity timer to clear chat after 5 minutes
+  // Inactivity timer to clear chat after 10 minutes
   useEffect(() => {
     const timer = setInterval(() => {
       const inactiveTime = Date.now() - lastInteraction;
-      if (inactiveTime > 5 * 60 * 1000) { // 5 minutes
+      if (inactiveTime > 10 * 60 * 1000) { // 10 minutes
         if (messages.length > 1) {
           setMessages([{ 
             role: 'bot', 
-            content: `Chat session cleared due to 5 minutes of inactivity. How can I help you?` 
+            content: `Chat session cleared due to 10 minutes of inactivity. How can I help you?` 
           }]);
           setAiHistory([]);
         }
@@ -162,6 +169,14 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             
             Instructions for Payments:
             If the user asks how to pay, list the available payment providers for their currency.
+            ALWAYS prioritize INR (₹) for Indian users.
+            Plans in INR:
+            - Garib Pro Max: ₹50
+            - VIP: ₹100
+            - Yearly: ₹800
+            
+            DO NOT show Dollar ($) prices unless the user is outside India.
+            
             Available Providers: ${paymentProviders.filter(p => p.enabled).map(p => `${p.name} (${p.currency}): ${p.upiId} - Recipient: ${p.recipientName}`).join(' | ')}
             
             Instructions for Partial Payments:
@@ -210,6 +225,76 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  const handleSpeak = async (text: string, index: number) => {
+    if (isSpeaking === index) {
+      audioRef.current?.pause();
+      setIsSpeaking(null);
+      return;
+    }
+
+    setIsSpeaking(index);
+    try {
+      const audioUrl = await generateSpeech(text);
+      if (audioUrl) {
+        if (audioRef.current) {
+          audioRef.current.src = audioUrl;
+          audioRef.current.play();
+          audioRef.current.onended = () => setIsSpeaking(null);
+        } else {
+          const audio = new Audio(audioUrl);
+          audioRef.current = audio;
+          audio.play();
+          audio.onended = () => setIsSpeaking(null);
+        }
+      } else {
+        toast.error("Could not generate speech");
+        setIsSpeaking(null);
+      }
+    } catch (error) {
+      console.error("TTS Error:", error);
+      setIsSpeaking(null);
+    }
+  };
+
+  const toggleListening = () => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error("Speech recognition not supported in this browser.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'hi-IN'; // Default to Hindi/Hinglish
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setInput(transcript);
+      setIsListening(false);
+      
+      // If in live mode, auto-submit
+      if (isLiveMode) {
+        setTimeout(() => {
+          const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
+          handleSubmit(fakeEvent, transcript);
+        }, 500);
+      }
+    };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
 
   const handleSearchAnime = async (searchTerm: string) => {
     try {
@@ -344,6 +429,12 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               content: `✅ **Payment Verified!**\n\nAapka payment verify ho gaya hai. Aapka **${matchingPlan.name}** plan ka coupon code ye hai:\n\n**CODE:** \`${redeemCode}\`\n\nIsko [**Redeem Code**](/redeem) page par jaakar use karein apna premium activate karne ke liye!` 
             }]);
             
+            // Add to AI history for context
+            setAiHistory(prev => [...prev, 
+              { role: 'user', content: "Sent a payment screenshot for ₹" + totalPaidSoFar },
+              { role: 'assistant', content: `Payment verified for ${matchingPlan.name}. Generated coupon code: ${redeemCode}` }
+            ]);
+            
             // Clear pending payment after success
             if (user) {
               await updateDoc(doc(db, 'users', user.uid), {
@@ -391,6 +482,12 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               role: 'bot', 
               content: `Aapne **₹${paid}** bheje hain. Kya ye galti se kam amount bheja hai?\n\nHamare plans ye hain:\n${plansList}\n\nAap kaunsa plan lena chahte hain?` 
             }]);
+
+            // Add to AI history for context
+            setAiHistory(prev => [...prev, 
+              { role: 'user', content: "Sent a partial payment screenshot for ₹" + paid },
+              { role: 'assistant', content: `I received ₹${paid}. I informed the user that it's a partial payment and listed the plans: ${plansList}` }
+            ]);
           } else {
             const telegramMessage = `❌ *AI CHATBOT REJECTED*\n\n👤 *User:* ${userData?.name || 'Anonymous'}\n📧 *Email:* ${userData?.email}\n🆔 *UTR:* ${pInfo.utr || 'N/A'}\n⚠️ *Reason:* ${pInfo.reason || 'Invalid screenshot'}`;
             await sendTelegramNotification(telegramMessage);
@@ -423,20 +520,20 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     reader.readAsDataURL(file);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading || isAnalyzing) return;
+  const handleSubmit = async (e: React.FormEvent, overrideInput?: string) => {
+    if (e) e.preventDefault();
+    const messageToSend = overrideInput || input.trim();
+    if (!messageToSend || isLoading || isAnalyzing) return;
 
-    const userMessage = input.trim();
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    setMessages(prev => [...prev, { role: 'user', content: messageToSend }]);
     setIsLoading(true);
 
     try {
       // Check if user is asking for anime search
       let contextAddition = "";
-      if (userMessage.toLowerCase().includes('search') || userMessage.toLowerCase().includes('find')) {
-        const searchTerm = userMessage.replace(/search|find/gi, '').trim();
+      if (messageToSend.toLowerCase().includes('search') || messageToSend.toLowerCase().includes('find')) {
+        const searchTerm = messageToSend.replace(/search|find/gi, '').trim();
         const results = await handleSearchAnime(searchTerm);
         if (results.length > 0) {
           contextAddition = `\n\nContext: I found these anime in the database: ${results.map(r => r.title).join(', ')}. Mention them to the user in Hinglish.`;
@@ -446,13 +543,18 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       const newHistory: ChatMessage[] = [
         { role: 'system', content: config?.systemPrompt || 'You are a helpful assistant for SahidAnime. Reply in Hinglish.' },
         ...aiHistory,
-        { role: 'user', content: userMessage + contextAddition }
+        { role: 'user', content: messageToSend + contextAddition }
       ];
 
       const response = await chatWithAI(newHistory);
       
       setMessages(prev => [...prev, { role: 'bot', content: response }]);
       setAiHistory([...newHistory, { role: 'assistant', content: response }]);
+
+      // Auto-speak if enabled
+      if (autoSpeak || isLiveMode) {
+        handleSpeak(response, messages.length + 1);
+      }
     } catch (error: any) {
       setMessages(prev => [...prev, { role: 'bot', content: "I'm sorry, I'm having trouble connecting to my brain right now. Please try again later." }]);
     } finally {
@@ -467,6 +569,77 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       exit={{ opacity: 0, y: 20, scale: 0.95 }}
       className="w-full sm:w-[450px] h-[85vh] sm:h-[600px] bg-zinc-950 border border-zinc-800 rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden fixed bottom-0 right-0 sm:bottom-6 sm:right-6 z-[100]"
     >
+      {/* Live Mode Overlay */}
+      <AnimatePresence>
+        {isLiveMode && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[110] bg-zinc-950 flex flex-col items-center justify-center p-8 text-center"
+          >
+            <button 
+              onClick={() => setIsLiveMode(false)}
+              className="absolute top-6 right-6 p-2 bg-zinc-900 rounded-full text-zinc-500 hover:text-white transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+
+            <div className="relative mb-12">
+              <motion.div
+                animate={{ 
+                  scale: isListening ? [1, 1.2, 1] : 1,
+                  opacity: isListening ? [0.5, 1, 0.5] : 0.5
+                }}
+                transition={{ repeat: Infinity, duration: 1.5 }}
+                className="absolute inset-0 bg-blue-600 rounded-full blur-3xl"
+              />
+              <div className={cn(
+                "w-32 h-32 rounded-full flex items-center justify-center relative z-10 transition-all duration-500",
+                isListening ? "bg-blue-600 scale-110" : "bg-zinc-900 border-2 border-zinc-800"
+              )}>
+                {isListening ? (
+                  <Mic className="w-12 h-12 text-white animate-pulse" />
+                ) : isLoading ? (
+                  <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
+                ) : isSpeaking !== null ? (
+                  <Volume2 className="w-12 h-12 text-green-500 animate-bounce" />
+                ) : (
+                  <Bot className="w-12 h-12 text-zinc-500" />
+                )}
+              </div>
+            </div>
+
+            <h2 className="text-2xl font-black mb-2 tracking-tight">
+              {isListening ? "Listening..." : isLoading ? "Thinking..." : isSpeaking !== null ? "Speaking..." : "Ready to Talk"}
+            </h2>
+            <p className="text-zinc-500 text-sm max-w-xs mb-8">
+              {isListening ? "Aap bol sakte hain, main sun raha hoon." : "Tap the mic to start talking to me in real-time."}
+            </p>
+
+            <div className="flex gap-4">
+              <button
+                onClick={toggleListening}
+                className={cn(
+                  "px-8 py-4 rounded-2xl font-bold flex items-center gap-3 transition-all",
+                  isListening ? "bg-red-600 text-white" : "bg-blue-600 text-white hover:bg-blue-500"
+                )}
+              >
+                {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                {isListening ? "Stop Listening" : "Start Talking"}
+              </button>
+            </div>
+
+            {messages.length > 0 && (
+              <div className="mt-12 max-w-md">
+                <p className="text-xs text-zinc-600 uppercase tracking-widest font-bold mb-4">Last Message</p>
+                <p className="text-zinc-300 italic">"{messages[messages.length - 1].content.substring(0, 100)}..."</p>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <div className="p-4 border-b border-zinc-800 bg-zinc-900/50 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -482,6 +655,17 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button 
+            onClick={() => setIsLiveMode(!isLiveMode)}
+            className={cn(
+              "p-2 rounded-xl transition-all flex items-center gap-2",
+              isLiveMode ? "bg-red-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-white"
+            )}
+            title="Live Voice Mode"
+          >
+            <Mic className="w-4 h-4" />
+            <span className="text-[10px] font-bold uppercase hidden sm:inline">Live</span>
+          </button>
           <button 
             onClick={() => {
               setMessages([{ 
@@ -526,11 +710,20 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               {msg.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
             </div>
             <div className={cn(
-              "p-3 rounded-2xl text-sm leading-relaxed",
+              "p-3 rounded-2xl text-sm leading-relaxed relative group",
               msg.role === 'user' 
                 ? "bg-blue-600 text-white rounded-tr-none" 
                 : "bg-zinc-900 border border-zinc-800 text-zinc-300 rounded-tl-none"
             )}>
+              {msg.role === 'bot' && (
+                <button
+                  onClick={() => handleSpeak(msg.content, i)}
+                  className="absolute -right-10 top-0 p-2 bg-zinc-800 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-zinc-700 text-zinc-400 hover:text-white"
+                  title="Listen to message"
+                >
+                  {isSpeaking === i ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                </button>
+              )}
               {msg.role === 'bot' ? (
                 <div className="markdown-body prose prose-invert max-w-none">
                   <ReactMarkdown 
@@ -605,6 +798,18 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               <Send className="w-4 h-4" />
             </button>
           </div>
+          <button
+            type="button"
+            onClick={toggleListening}
+            disabled={isLoading || isAnalyzing}
+            className={cn(
+              "p-3 rounded-2xl transition-all disabled:opacity-50",
+              isListening ? "bg-red-600 text-white animate-pulse" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-white"
+            )}
+            title="Voice Input"
+          >
+            {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+          </button>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}

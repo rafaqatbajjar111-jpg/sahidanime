@@ -82,13 +82,28 @@ Website Details:
 - Social Media: WhatsApp (https://whatsapp.com/channel/0029Vahd4QT9Gv7M1esnDz46), Facebook (https://www.facebook.com/SahidAnime4u), Telegram (https://t.me/BTTH_HindiDub).
 - Special Content: BTTH (Battle Through The Heavens) is a popular series here. Episode 189 and some others are paid content.
 
+Subscription Plans (ONLY INR ₹ - NEVER SHOW DOLLARS):
+1. Garib Pro Max: ₹50
+2. VIP: ₹100
+3. Yearly: ₹800
+
+CRITICAL INSTRUCTIONS:
+- You are an Indian Assistant. ONLY use INR (₹).
+- If a user sends a screenshot of ₹50, it is for "Garib Pro Max".
+- If a user sends a screenshot of ₹100, it is for "VIP".
+- If a user sends a screenshot of ₹800, it is for "Yearly".
+- DO NOT ask "Which plan do you want?" if the amount matches one of these exactly. Just verify it.
+- ONLY check UTR/Transaction ID and Recipient Name (Sahid Anime 4 You or SK HAMJA).
+- IGNORE date and time on screenshots.
+
 Capabilities:
 - You can help users find anime.
 - You can explain subscription plans.
 - You can guide users on how to pay and get access.
+- You have a "Live Voice Mode" where users can talk to you in real-time. You will automatically speak back to them.
 - You should encourage users to join the WhatsApp channel and watch the QNA video (https://youtu.be/Ib5Hoi2r598).
 
-Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
+Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum). Reply in Hinglish style.`
   });
   const [paymentProviders, setPaymentProviders] = useState<PaymentProvider[]>([]);
   const [loading, setLoading] = useState(true);
@@ -329,7 +344,7 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
                 <input 
                   type="password"
                   placeholder="123456789:ABCdef..."
-                  value={config.botToken}
+                  value={config.botToken || ''}
                   onChange={(e) => setConfig({ ...config, botToken: e.target.value })}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-blue-500 transition-all"
                 />
@@ -342,7 +357,7 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
                 <input 
                   type="text"
                   placeholder="-100123456789"
-                  value={config.chatId}
+                  value={config.chatId || ''}
                   onChange={(e) => setConfig({ ...config, chatId: e.target.value })}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-blue-500 transition-all"
                 />
@@ -355,7 +370,7 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
                 <input 
                   type="text"
                   placeholder="https://your-app.com"
-                  value={config.appUrl}
+                  value={config.appUrl || ''}
                   onChange={(e) => setConfig({ ...config, appUrl: e.target.value })}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-blue-500 transition-all"
                 />
@@ -538,7 +553,7 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
                 <input 
                   type="text"
                   placeholder="https://t.me/yourusername"
-                  value={supportConfig.telegram}
+                  value={supportConfig.telegram || ''}
                   onChange={(e) => setSupportConfig({ ...supportConfig, telegram: e.target.value })}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-blue-500 transition-all"
                 />
@@ -551,7 +566,7 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
                 <input 
                   type="text"
                   placeholder="https://wa.me/1234567890"
-                  value={supportConfig.whatsapp}
+                  value={supportConfig.whatsapp || ''}
                   onChange={(e) => setSupportConfig({ ...supportConfig, whatsapp: e.target.value })}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-green-500 transition-all"
                 />
@@ -604,7 +619,7 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
                 <input 
                   type="text"
                   placeholder="SahidAnime Assistant"
-                  value={chatbotConfig.botName}
+                  value={chatbotConfig.botName || ''}
                   onChange={(e) => setChatbotConfig({ ...chatbotConfig, botName: e.target.value })}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-indigo-500 transition-all"
                 />
@@ -617,7 +632,7 @@ Tone: Friendly, professional, and Islamic greeting (Assalamu alaikum).`
                 <textarea 
                   rows={8}
                   placeholder="Enter system instructions for the AI..."
-                  value={chatbotConfig.systemPrompt}
+                  value={chatbotConfig.systemPrompt || ''}
                   onChange={(e) => setChatbotConfig({ ...chatbotConfig, systemPrompt: e.target.value })}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-2xl py-4 px-4 text-sm focus:outline-none focus:border-indigo-500 transition-all resize-none font-mono"
                 />
