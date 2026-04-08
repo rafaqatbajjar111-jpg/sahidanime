@@ -64,24 +64,20 @@ export const analyzeImage = async (base64Image: string, planDetails: string, val
     Your task is to analyze the provided image. 
     
     1. If the image is a **Payment Screenshot** (UPI, Bank Transfer, etc.):
-       - Extraction: Extract amount, UTR/Transaction ID, recipient name, and phone battery percentage.
-       - Verification: Check if it matches one of these plans: 
-         * Garib Pro Max: ₹50 (INR)
-         * VIP: ₹100 (INR)
-         * Yearly: ₹800 (INR)
-       - CRITICAL: If the amount is ₹50, it is ALWAYS for "Garib Pro Max". If ₹100, it is "VIP". If ₹800, it is "Yearly".
-       - Recipient Match: The recipient MUST be one of these: ${recipientsList}.
-       - Status: Must be "Success" or "Completed".
-       - CRITICAL: DO NOT check the date or time. Many users send screenshots from earlier today or yesterday. ONLY verify the UTR/Transaction ID and the Recipient Name/UPI.
+       - Extraction: Extract ONLY the amount. Ignore UTR, Transaction ID, and Recipient Name.
+       - Verification: BE EXTREMELY LENIENT. If it looks like a payment screenshot, APPROVE IT.
+       - CRITICAL: If the amount is exactly 50, 100, or 800, you MUST set status to "APPROVED".
+       - CRITICAL: ONLY look at the amount. If the amount is ₹50, ₹100, or ₹800, approve it immediately.
+       - CRITICAL: DO NOT check UTR, Transaction ID, Recipient Name, Date, or Time.
        - Respond with type: "PAYMENT".
-       - If verified, tell them: "✅ Payment Verified! Aapka coupon code generate ho gaya hai. Isko redeem page par use karein: [Link to Redeem]"
+       - If verified, tell them: "✅ Payment Verified! Aapka premium plan automatically activate ho gaya hai. Enjoy your anime!"
 
     2. If the user says something like "Mujhe plan chahie", "I need a plan", "Plans dikhao", etc.:
        - List all available plans ONLY in INR (₹):
          * Garib Pro Max: ₹50
          * VIP: ₹100
          * Yearly: ₹800
-       - DO NOT mention Dollars ($) or any other currency unless specifically asked.
+       - DO NOT mention Dollars ($) or any other currency.
        - Tell them to pay the exact amount in INR (₹) to one of the UPI IDs and send the screenshot here.
 
     3. If the image is **NOT a payment screenshot** (e.g., a selfie, a landscape, a meme, anime art, etc.):

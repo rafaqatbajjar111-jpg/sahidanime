@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { collection, query, getDocs, limit, doc, onSnapshot, addDoc, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import { collection, query, getDocs, limit, doc, onSnapshot, addDoc, serverTimestamp, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
 import { useNavigate } from 'react-router-dom';
 import { MessageSquare, Send, X, Bot, User, Loader2, Sparkles, Play, Search, List, ExternalLink, Image as ImageIcon, Upload, Trash2, Mic, MicOff } from 'lucide-react';
@@ -18,6 +18,7 @@ import { toast } from 'react-hot-toast';
 import { chatWithAI, ChatMessage } from '../services/aiService';
 import { setDoc } from 'firebase/firestore';
 import { Volume2, VolumeX } from 'lucide-react';
+import { PLANS as DEFAULT_PLANS } from '../constants';
 
 const generateRedeemCode = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -65,22 +66,15 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<any>(null);
 
-  // Inactivity timer to clear chat after 10 minutes
+  // Continuous listening logic for Live Mode
   useEffect(() => {
-    const timer = setInterval(() => {
-      const inactiveTime = Date.now() - lastInteraction;
-      if (inactiveTime > 10 * 60 * 1000) { // 10 minutes
-        if (messages.length > 1) {
-          setMessages([{ 
-            role: 'bot', 
-            content: `Chat session cleared due to 10 minutes of inactivity. How can I help you?` 
-          }]);
-          setAiHistory([]);
-        }
-      }
-    }, 30000); // Check every 30 seconds
-    return () => clearInterval(timer);
-  }, [lastInteraction, messages.length]);
+    if (isLiveMode && !isListening && isSpeaking === null && !isLoading) {
+      const timer = setTimeout(() => {
+        toggleListening();
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [isLiveMode, isListening, isSpeaking, isLoading]);
 
   useEffect(() => {
     setLastInteraction(Date.now());
@@ -109,7 +103,9 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       
       if (userData?.pending_payment) {
         const { paidAmount, planName, remainingAmount } = userData.pending_payment;
-        initialMessage = `Assalamu alaikum! Aapne pehle **₹${paidAmount}** pay kiye hain. **${planName}** activate karne ke liye aapko **₹${remainingAmount || 'kuch'}** aur pay karne honge. Aap screenshot yahan upload kar sakte hain!`;
+        const pName = planName || "Premium Plan";
+        const rAmount = remainingAmount !== undefined ? remainingAmount : "kuch";
+        initialMessage = `Assalamu alaikum! Aapne pehle **₹${paidAmount}** pay kiye hain. **${pName}** activate karne ke liye aapko **₹${rAmount}** aur pay karne honge. Aap screenshot yahan upload kar sakte hain!`;
       }
 
       setMessages([{ 
@@ -324,12 +320,14 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
       try {
         // 1. Get all premium plans
-        const premiumPlans = plans.filter(p => p.id !== 'free');
+        let currentPlans = plans.length > 0 ? plans : DEFAULT_PLANS;
+        const premiumPlans = currentPlans.filter(p => p.id !== 'free');
         const countryCode = userData?.country || 'IN';
         
         const allPlansInfo = premiumPlans.map(p => {
-          const price = p.prices[countryCode] || p.prices.DEFAULT;
-          return `${p.name}: ${price.symbol}${price.amount}`;
+          // FORCE INR (₹) for the AI prompt to avoid dollar confusion
+          const price = p.prices['IN'] || p.prices.DEFAULT;
+          return `${p.name}: ₹${price.amount}`;
         }).join(", ");
 
         const planDetails = `Available Plans: ${allPlansInfo}`;
@@ -355,53 +353,51 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         if (aiResult.type === 'PAYMENT') {
           const pInfo = aiResult.paymentInfo;
           
-          // 3. Duplicate Detection by UTR
-          if (pInfo.utr) {
-            try {
-              const q = query(collection(db, 'purchaseRequests'), where('utr', '==', pInfo.utr));
-              const duplicateSnapshot = await getDocs(q);
-              if (!duplicateSnapshot.empty) {
-                setMessages(prev => [...prev, { 
-                  role: 'bot', 
-                  content: "❌ Ye Transaction ID (UTR) pehle hi use ho chuka hai. Please naya payment screenshot bhejein." 
-                }]);
-                return;
-              }
-            } catch (e) {
-              console.warn('Duplicate UTR check failed, skipping...', e);
-            }
-          }
-
-          const paid = Number(pInfo.amount) || 0;
+          const cleanAmount = typeof pInfo.amount === 'string' 
+            ? pInfo.amount.replace(/[^0-9.]/g, '') 
+            : pInfo.amount;
+          const paid = Math.round(Number(cleanAmount) || 0);
           const existingPending = userData?.pending_payment;
-          const totalPaidSoFar = (existingPending?.paidAmount || 0) + paid;
+          const totalPaidSoFar = Math.round((existingPending?.paidAmount || 0) + paid);
 
           // Check if totalPaidSoFar matches any plan
+          // We check all prices in all currencies to be super lenient
+          // Also check if the CURRENT paid amount matches directly
           const matchingPlan = premiumPlans.find(p => {
-            const price = p.prices[countryCode] || p.prices.DEFAULT;
-            return price.amount === totalPaidSoFar;
+            return Object.values(p.prices).some((price: any) => {
+              const planAmount = Math.round(Number(price.amount));
+              return planAmount === paid || planAmount === totalPaidSoFar;
+            });
           });
 
           if (matchingPlan && pInfo.status !== 'REJECTED') {
-            const price = matchingPlan.prices[countryCode] || matchingPlan.prices.DEFAULT;
+            const price = matchingPlan.prices['IN'] || matchingPlan.prices.DEFAULT;
             
-            // GENERATE REDEEM CODE INSTEAD OF DIRECT ACTIVATION
+            // Use the actual matched total for the record
+            const finalPaidAmount = matchingPlan.prices['IN']?.amount || totalPaidSoFar;
+            
+            // GENERATE REDEEM CODE FOR RECORD KEEPING
             const redeemCode = generateRedeemCode();
+            const expirationDate = getSubscriptionExpiration(price.duration as 'month' | 'year' || 'month');
             
-            await setDoc(doc(db, 'redeemCodes', redeemCode), {
+            const batch = writeBatch(db);
+
+            // 1. Create redeem code record (already used)
+            batch.set(doc(db, 'redeemCodes', redeemCode), {
               code: redeemCode,
               planId: matchingPlan.id,
               planName: matchingPlan.name,
               maxUses: 1,
-              usedCount: 0,
-              usedBy: [],
+              usedCount: 1,
+              usedBy: [user.uid],
               createdAt: serverTimestamp(),
-              generatedBy: 'chatbot_ai',
-              userId: user?.uid || 'anonymous'
+              generatedBy: 'chatbot_ai_auto',
+              userId: user.uid
             });
 
-            await addDoc(collection(db, 'purchaseRequests'), {
-              userId: user?.uid || 'anonymous',
+            // 2. Create purchase request record
+            batch.set(doc(collection(db, 'purchaseRequests')), {
+              userId: user.uid,
               userName: userData?.name || 'Anonymous',
               userEmail: userData?.email,
               planId: matchingPlan.id,
@@ -411,47 +407,61 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               recipient: pInfo.recipient || 'SK HAMJA',
               currency: price.currency,
               country: countryCode,
-              transactionId: pInfo.utr || 'AI_CHATBOT_COUPON',
+              transactionId: pInfo.utr || 'AI_AUTO_ACTIVATE',
               utr: pInfo.utr || null,
-              battery: pInfo.battery || null,
-              screenshot: null, 
               status: 'approved',
               redeemCode: redeemCode,
               createdAt: serverTimestamp()
             });
 
+            // 3. Update user subscription directly
+            batch.update(doc(db, 'users', user.uid), {
+              subscription_plan: matchingPlan.id,
+              subscription_status: 'active',
+              subscription_method: 'ai_chatbot',
+              subscription_updated_at: serverTimestamp(),
+              subscription_expiry: expirationDate,
+              pending_payment: null
+            });
+
+            await batch.commit();
+
             // Telegram Notification
-            const telegramMessage = `🚀 *AI CHATBOT COUPON GENERATED*\n\n✅ *User:* ${userData?.name || 'Anonymous'}\n📧 *Email:* ${userData?.email}\n📦 *Plan:* ${matchingPlan.name}\n💰 *Amount:* ${price.symbol}${price.amount}\n🌍 *Country:* ${countryCode}\n✨ *Coupon:* \`${redeemCode}\`\n🆔 *UTR:* ${pInfo.utr || 'N/A'}`;
+            const telegramMessage = `🚀 *AI AUTO-PREMIUM ACTIVATED*\n\n✅ *User:* ${userData?.name || 'Anonymous'}\n📧 *Email:* ${userData?.email}\n📦 *Plan:* ${matchingPlan.name}\n💰 *Amount:* ${price.symbol}${price.amount}\n🌍 *Country:* ${countryCode}\n📅 *Expiry:* ${expirationDate.toLocaleDateString()}`;
             await sendTelegramNotification(telegramMessage);
 
             setMessages(prev => [...prev, { 
               role: 'bot', 
-              content: `✅ **Payment Verified!**\n\nAapka payment verify ho gaya hai. Aapka **${matchingPlan.name}** plan ka coupon code ye hai:\n\n**CODE:** \`${redeemCode}\`\n\nIsko [**Redeem Code**](/redeem) page par jaakar use karein apna premium activate karne ke liye!` 
+              content: `✅ **Payment Verified!**\n\nAb aapka **${matchingPlan.name}** plan **Automatically Activate** ho gaya hai! 🎉\n\nAb aap ad-free streaming aur saare premium features enjoy kar sakte hain. Enjoy your anime!` 
             }]);
             
             // Add to AI history for context
             setAiHistory(prev => [...prev, 
               { role: 'user', content: "Sent a payment screenshot for ₹" + totalPaidSoFar },
-              { role: 'assistant', content: `Payment verified for ${matchingPlan.name}. Generated coupon code: ${redeemCode}` }
+              { role: 'assistant', content: `Payment verified for ${matchingPlan.name}. I have automatically activated their premium subscription.` }
             ]);
-            
-            // Clear pending payment after success
-            if (user) {
-              await updateDoc(doc(db, 'users', user.uid), {
-                pending_payment: null
-              });
-            }
 
           } else if (paid > 0 && pInfo.status !== 'REJECTED') {
             const plansList = premiumPlans.map(p => {
-              const price = p.prices[countryCode] || p.prices.DEFAULT;
-              return `- **${p.name}**: ${price.symbol}${price.amount}`;
+              const price = p.prices['IN'] || p.prices.DEFAULT;
+              return `- **${p.name}**: ₹${price.amount}`;
             }).join("\n");
+
+            // Find the next plan they are likely aiming for
+            const nextPlan = premiumPlans
+              .map(p => ({ ...p, price: (p.prices['IN'] || p.prices.DEFAULT).amount }))
+              .filter(p => p.price > totalPaidSoFar)
+              .sort((a, b) => a.price - b.price)[0];
+
+            const planName = nextPlan?.name || "Premium Plan";
+            const remainingAmount = nextPlan ? (nextPlan.price - totalPaidSoFar) : 0;
 
             if (user) {
               await updateDoc(doc(db, 'users', user.uid), {
                 pending_payment: {
                   paidAmount: totalPaidSoFar,
+                  planName: planName,
+                  remainingAmount: remainingAmount,
                   currency: 'INR',
                   timestamp: new Date().toISOString()
                 }
@@ -465,6 +475,8 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               amount: paid.toString(),
               paidAmount: paid,
               totalPaidSoFar: totalPaidSoFar,
+              planName: planName,
+              remainingAmount: remainingAmount,
               recipient: pInfo.recipient || 'SK HAMJA',
               currency: 'INR',
               country: countryCode,
@@ -475,12 +487,12 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               createdAt: serverTimestamp()
             });
 
-            const telegramMessage = `⚠️ *AI CHATBOT PARTIAL*\n\n👤 *User:* ${userData?.name || 'Anonymous'}\n💰 *Paid:* ${paid}\n📉 *Total Paid:* ${totalPaidSoFar}\n🆔 *UTR:* ${pInfo.utr || 'N/A'}`;
+            const telegramMessage = `⚠️ *AI CHATBOT PARTIAL*\n\n👤 *User:* ${userData?.name || 'Anonymous'}\n💰 *Paid:* ${paid}\n📉 *Total Paid:* ${totalPaidSoFar}\n📦 *Target:* ${planName}\n📉 *Remaining:* ${remainingAmount}\n🆔 *UTR:* ${pInfo.utr || 'N/A'}`;
             await sendTelegramNotification(telegramMessage);
 
             setMessages(prev => [...prev, { 
               role: 'bot', 
-              content: `Aapne **₹${paid}** bheje hain. Kya ye galti se kam amount bheja hai?\n\nHamare plans ye hain:\n${plansList}\n\nAap kaunsa plan lena chahte hain?` 
+              content: `Aapne **₹${paid}** bheje hain. Aapka total payment ab **₹${totalPaidSoFar}** ho gaya hai.\n\n**${planName}** activate karne ke liye aapko **₹${remainingAmount}** aur pay karne honge.\n\nHamare plans ye hain:\n${plansList}\n\nAap screenshot yahan upload kar sakte hain jab aap baki amount pay kar dein!` 
             }]);
 
             // Add to AI history for context
@@ -512,7 +524,17 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           ]);
         }
       } catch (error: any) {
-        setMessages(prev => [...prev, { role: 'bot', content: "Error verifying payment: " + error.message }]);
+        console.error("AI Analysis Error:", error);
+        let errorMessage = "Error verifying payment: " + error.message;
+        
+        if (error.message?.includes('quota exceeded') || error.message?.includes('Quota exceeded')) {
+          errorMessage = "⚠️ **Database Quota Exceeded**: Firestore free tier limit khatam ho gaya hai. Please kal try karein ya admin se contact karein. Aapka payment safe hai!";
+        }
+        
+        setMessages(prev => [...prev, { 
+          role: 'bot', 
+          content: errorMessage
+        }]);
       } finally {
         setIsAnalyzing(false);
       }
@@ -556,7 +578,13 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         handleSpeak(response, messages.length + 1);
       }
     } catch (error: any) {
-      setMessages(prev => [...prev, { role: 'bot', content: "I'm sorry, I'm having trouble connecting to my brain right now. Please try again later." }]);
+      let errorMessage = "I'm sorry, I'm having trouble connecting to my brain right now. Please try again later.";
+      
+      if (error.message?.includes('quota exceeded') || error.message?.includes('Quota exceeded')) {
+        errorMessage = "⚠️ **Database Quota Exceeded**: Firestore free tier limit khatam ho gaya hai. Please kal try karein ya admin se contact karein. Aapka payment safe hai!";
+      }
+      
+      setMessages(prev => [...prev, { role: 'bot', content: errorMessage }]);
     } finally {
       setIsLoading(false);
     }
@@ -798,18 +826,6 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               <Send className="w-4 h-4" />
             </button>
           </div>
-          <button
-            type="button"
-            onClick={toggleListening}
-            disabled={isLoading || isAnalyzing}
-            className={cn(
-              "p-3 rounded-2xl transition-all disabled:opacity-50",
-              isListening ? "bg-red-600 text-white animate-pulse" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-white"
-            )}
-            title="Voice Input"
-          >
-            {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-          </button>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}

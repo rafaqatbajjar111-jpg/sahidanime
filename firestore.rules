@@ -59,7 +59,8 @@ service cloud.firestore {
           // Allow owner to update subscription if using a coupon or AI auto-approval
           ((request.resource.data.get('subscription_method', '') == 'coupon' || 
             request.resource.data.get('subscription_method', '') == 'ai_auto' ||
-            request.resource.data.get('subscription_method', '') == 'ai_chatbot') && 
+            request.resource.data.get('subscription_method', '') == 'ai_chatbot' ||
+            request.resource.data.get('subscription_method', '') == 'chatbot_ai_auto') && 
            request.resource.data.get('subscription_status', '') == 'active') ||
           // Allow owner to update pending_payment for partial payments
           (request.resource.data.diff(resource.data).affectedKeys().hasAny(['pending_payment'])) ||
@@ -135,7 +136,13 @@ service cloud.firestore {
     match /redeemCodes/{codeId} {
       allow get: if isAuthenticated();
       allow list: if isAdmin();
-      allow create: if isAdmin();
+      allow create: if isAdmin() || (
+        isAuthenticated() && 
+        request.resource.data.generatedBy in ['chatbot_ai_auto', 'chatbot_ai'] &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.usedCount == 1 &&
+        request.auth.uid in request.resource.data.usedBy
+      );
       allow update: if isAdmin() || (
         isAuthenticated() && 
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount', 'usedBy']) &&
