@@ -9,7 +9,7 @@ export interface ChatMessage {
 export const chatWithAI = async (messages: ChatMessage[]) => {
   const apiKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
   if (!apiKey) {
-    throw new Error('AI Service is not configured. Please add VITE_SUPABASE_ANON_KEY to environment variables.');
+    throw new Error('Supabase API Key is not configured.');
   }
 
   try {
@@ -49,10 +49,9 @@ export const chatWithAI = async (messages: ChatMessage[]) => {
 export const analyzeImage = async (base64Image: string, planDetails: string, validRecipients: string[] = ["Sahid Anime 4 You", "SK HAMJA", "btthhindidubmasala@okicici"]) => {
   const apiKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
   if (!apiKey) {
-    throw new Error('AI Service is not configured. Please add VITE_SUPABASE_ANON_KEY to environment variables.');
+    throw new Error('Supabase API Key is not configured.');
   }
 
-  const recipientsList = validRecipients.join(", ");
   const currentDate = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' });
   const currentTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 
@@ -64,36 +63,23 @@ export const analyzeImage = async (base64Image: string, planDetails: string, val
     Your task is to analyze the provided image. 
     
     1. If the image is a **Payment Screenshot** (UPI, Bank Transfer, etc.):
-       - Extraction: Extract ONLY the amount. Ignore UTR, Transaction ID, and Recipient Name.
-       - Verification: BE EXTREMELY LENIENT. If it looks like a payment screenshot, APPROVE IT.
-       - CRITICAL: If the amount is exactly 50, 100, or 800, you MUST set status to "APPROVED".
-       - CRITICAL: ONLY look at the amount. If the amount is ₹50, ₹100, or ₹800, approve it immediately.
-       - CRITICAL: DO NOT check UTR, Transaction ID, Recipient Name, Date, or Time.
+       - Extraction: Extract the EXACT amount and the currency (e.g., 35, INR). Be extremely careful with the digits.
+       - Verification: BE EXTREMELY LENIENT with the image quality, but STRICT with the extracted amount. If it looks like a real payment, set status to "APPROVED".
+       - IMPORTANT: We accept ANY amount (e.g., ₹10, ₹35, ₹50, etc.). Partial payments are allowed.
        - Respond with type: "PAYMENT".
-       - If verified, tell them: "✅ Payment Verified! Aapka premium plan automatically activate ho gaya hai. Enjoy your anime!"
+       - If verified, tell them: "✅ Payment Screenshot Verified! System check kar raha hai..."
+       - If the amount is not clear, ask them to send a clearer screenshot.
 
-    2. If the user says something like "Mujhe plan chahie", "I need a plan", "Plans dikhao", etc.:
-       - List all available plans ONLY in INR (₹):
-         * Garib Pro Max: ₹50
-         * VIP: ₹100
-         * Yearly: ₹800
-       - DO NOT mention Dollars ($) or any other currency.
-       - Tell them to pay the exact amount in INR (₹) to one of the UPI IDs and send the screenshot here.
-
-    3. If the image is **NOT a payment screenshot** (e.g., a selfie, a landscape, a meme, anime art, etc.):
-       - Analyze what is in the image.
-       - Respond with type: "GENERAL".
-
-    Respond ONLY with a JSON object:
+    Respond ONLY with a JSON object. DO NOT include any text outside the JSON.
+    JSON Structure:
     {
       "type": "PAYMENT" | "GENERAL",
       "paymentInfo": {
         "status": "APPROVED" | "PARTIAL" | "REJECTED",
         "utr": "extracted_utr_or_null",
-        "battery": "extracted_battery_percentage_or_null",
         "amount": number,
-        "recipient": "extracted_name",
-        "reason": "Reason if REJECTED or PARTIAL (in Hinglish style - Hindi/English mix). Be clear that we only accept INR (₹)."
+        "currency": "INR" | "PKR" | "BDT" | "USD",
+        "reason": "Reason if REJECTED or PARTIAL (in Hinglish style). Be clear about the amount you saw."
       },
       "generalInfo": {
         "description": "A brief description of what you see in the image (in Hinglish style)",
@@ -149,41 +135,5 @@ export const analyzeImage = async (base64Image: string, planDetails: string, val
   } catch (error: any) {
     console.error("AI Analysis Error:", error);
     throw new Error(`AI Analysis Error: ${error.message}`);
-  }
-};
-
-export const generateSpeech = async (text: string) => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    console.warn('GEMINI_API_KEY not found. TTS disabled.');
-    return null;
-  }
-
-  try {
-    // We use the @google/genai SDK pattern from the skill
-    const { GoogleGenAI, Modality } = await import("@google/genai");
-    const ai = new GoogleGenAI({ apiKey });
-    
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-preview-tts",
-      contents: [{ parts: [{ text: `Say naturally in a friendly Hinglish tone: ${text}` }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Kore' },
-          },
-        },
-      },
-    });
-
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (base64Audio) {
-      return `data:audio/wav;base64,${base64Audio}`;
-    }
-    return null;
-  } catch (error) {
-    console.error("TTS Generation Error:", error);
-    return null;
   }
 };

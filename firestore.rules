@@ -56,15 +56,12 @@ service cloud.firestore {
         request.resource.data.role == resource.data.role &&
         request.resource.data.uid == resource.data.uid &&
         (
-          // Allow owner to update subscription if using a coupon or AI auto-approval
-          ((request.resource.data.get('subscription_method', '') == 'coupon' || 
-            request.resource.data.get('subscription_method', '') == 'ai_auto' ||
-            request.resource.data.get('subscription_method', '') == 'ai_chatbot' ||
-            request.resource.data.get('subscription_method', '') == 'chatbot_ai_auto') && 
+          // Allow owner to update subscription if using a chatbot/AI method
+          ((request.resource.data.get('subscription_method', '') in ['coupon', 'ai_auto', 'ai_chatbot', 'chatbot_ai_auto', 'chatbot_ai']) && 
            request.resource.data.get('subscription_status', '') == 'active') ||
-          // Allow owner to update pending_payment for partial payments
+          // Allow owner to update pending_payment for partial payments or clearing it
           (request.resource.data.diff(resource.data).affectedKeys().hasAny(['pending_payment'])) ||
-          // Otherwise, subscription fields must remain unchanged
+          // Allow updating subscription fields if they are not changing (e.g. updating other profile info)
           (request.resource.data.get('subscription_status', '') == resource.data.get('subscription_status', '') &&
            request.resource.data.get('subscription_plan', '') == resource.data.get('subscription_plan', ''))
         )

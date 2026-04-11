@@ -16,10 +16,12 @@ export const GlobalAds: React.FC = () => {
         adContainer.style.position = 'fixed';
         adContainer.style.top = '0';
         adContainer.style.left = '0';
-        adContainer.style.width = '100%';
-        adContainer.style.height = '100%';
-        adContainer.style.zIndex = '999999';
+        adContainer.style.width = '1px';
+        adContainer.style.height = '1px';
+        adContainer.style.overflow = 'hidden';
+        adContainer.style.zIndex = '-1'; 
         adContainer.style.pointerEvents = 'none';
+        adContainer.style.opacity = '0';
         document.body.appendChild(adContainer);
 
         const scripts = [
@@ -53,7 +55,6 @@ export const GlobalAds: React.FC = () => {
       const style = document.createElement('style');
       style.textContent = `
         .global-ad-instance * {
-          pointer-events: auto !important;
           display: block !important;
           visibility: visible !important;
           opacity: 1 !important;

@@ -24,6 +24,9 @@ interface Plan {
 
 interface AnimeContextType {
   animes: Anime[];
+  filteredAnimes: Anime[];
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
   loading: boolean;
 }
 
@@ -32,7 +35,13 @@ const AnimeContext = createContext<AnimeContextType | undefined>(undefined);
 export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isAuthReady } = useAuth();
   const [animes, setAnimes] = useState<Anime[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
+
+  const filteredAnimes = animes.filter(anime => 
+    anime.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    anime.genre.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   useEffect(() => {
     const animeQuery = query(collection(db, 'anime'));
@@ -59,7 +68,7 @@ export const AnimeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   return (
-    <AnimeContext.Provider value={{ animes, loading }}>
+    <AnimeContext.Provider value={{ animes, filteredAnimes, searchQuery, setSearchQuery, loading }}>
       {children}
     </AnimeContext.Provider>
   );

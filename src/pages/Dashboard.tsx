@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
 
 export const Dashboard: React.FC = () => {
-  const { animes, loading } = useAnime();
+  const { animes, filteredAnimes, loading } = useAnime();
   const { theme } = useTheme();
   const [currentBannerIndex, setCurrentBannerIndex] = React.useState(0);
 
@@ -161,7 +161,7 @@ export const Dashboard: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 lg:gap-8">
-          {animes.map((anime, index) => (
+          {filteredAnimes.map((anime, index) => (
             <motion.div
               key={anime.id}
               initial={{ opacity: 0, y: 30 }}

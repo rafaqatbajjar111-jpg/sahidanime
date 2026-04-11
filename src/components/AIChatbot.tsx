@@ -2,22 +2,22 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { collection, query, getDocs, limit, doc, onSnapshot, addDoc, serverTimestamp, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase/firebase';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, Send, X, Bot, User, Loader2, Sparkles, Play, Search, List, ExternalLink, Image as ImageIcon, Upload, Trash2, Mic, MicOff } from 'lucide-react';
+import { MessageSquare, Send, X, Bot, User, Loader2, Sparkles, Play, Search, List, ExternalLink, Image as ImageIcon, Upload, Trash2, Settings, Mic, MicOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '../lib/utils';
 import { usePlans } from '../hooks/usePlans';
 import { useAuth } from '../context/AuthContext';
+import { useAnime } from '../context/AnimeContext';
 import { useLocation } from 'react-router-dom';
 import { handleFirestoreError, OperationType } from '../firebase/firestoreError';
-import { analyzeImage, generateSpeech } from '../services/aiService';
+import { analyzeImage } from '../services/aiService';
 import { getSubscriptionExpiration } from '../lib/subscriptionUtils';
 import { sendTelegramNotification } from '../services/telegramService';
 import { toast } from 'react-hot-toast';
 import { chatWithAI, ChatMessage } from '../services/aiService';
 import { setDoc } from 'firebase/firestore';
-import { Volume2, VolumeX } from 'lucide-react';
 import { PLANS as DEFAULT_PLANS } from '../constants';
 
 const generateRedeemCode = () => {
@@ -49,6 +49,7 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { user, userData } = useAuth();
   const { plans, paymentMethods, paymentProviders, loading: plansLoading } = usePlans();
   const [config, setConfig] = useState<ChatbotConfig | null>(null);
+  const { animes } = useAnime();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -61,20 +62,45 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
   // Keep track of raw messages for AI context
   const [aiHistory, setAiHistory] = useState<ChatMessage[]>([]);
-  const [isSpeaking, setIsSpeaking] = useState<number | null>(null);
   const [isListening, setIsListening] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsForm, setSettingsForm] = useState({ botName: '', systemPrompt: '' });
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (config) {
+      setSettingsForm({ botName: config.botName, systemPrompt: config.systemPrompt });
+    }
+  }, [config]);
+
+  const handleSaveSettings = async () => {
+    if (!user || userData?.role !== 'admin') return;
+    setIsSavingSettings(true);
+    try {
+      await setDoc(doc(db, 'settings', 'chatbot'), {
+        ...settingsForm,
+        enabled: true
+      });
+      toast.success('Bot settings updated!');
+      setShowSettings(false);
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      toast.error('Failed to save settings');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
 
   // Continuous listening logic for Live Mode
   useEffect(() => {
-    if (isLiveMode && !isListening && isSpeaking === null && !isLoading) {
+    if (isLiveMode && !isListening && !isLoading) {
       const timer = setTimeout(() => {
         toggleListening();
       }, 1000);
       return () => clearTimeout(timer);
     }
-  }, [isLiveMode, isListening, isSpeaking, isLoading]);
+  }, [isLiveMode, isListening, isLoading]);
 
   useEffect(() => {
     setLastInteraction(Date.now());
@@ -103,9 +129,9 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       
       if (userData?.pending_payment) {
         const { paidAmount, planName, remainingAmount } = userData.pending_payment;
-        const pName = planName || "Premium Plan";
-        const rAmount = remainingAmount !== undefined ? remainingAmount : "kuch";
-        initialMessage = `Assalamu alaikum! Aapne pehle **₹${paidAmount}** pay kiye hain. **${pName}** activate karne ke liye aapko **₹${rAmount}** aur pay karne honge. Aap screenshot yahan upload kar sakte hain!`;
+        const pName = planName && planName !== "undefined" ? planName : "Premium Plan";
+        const rAmount = (remainingAmount !== undefined && remainingAmount !== null) ? remainingAmount : "kuch";
+        initialMessage = `Assalamu alaikum! Aapne pehle **₹${paidAmount || 0}** pay kiye hain. **${pName}** activate karne ke liye aapko **₹${rAmount}** aur pay karne honge. Aap screenshot yahan upload kar sakte hain!`;
       }
 
       setMessages([{ 
@@ -114,38 +140,6 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       }]);
     }
   }, [config, userData, messages.length]);
-
-  const chatWithAI = async (messages: ChatMessage[]) => {
-    const apiKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    if (!apiKey) {
-      throw new Error('AI Service is not configured.');
-    }
-
-    const response = await fetch(AI_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "apikey": apiKey
-      },
-      body: JSON.stringify({
-        "model": DEFAULT_MODEL,
-        "messages": messages.map(m => ({
-          role: m.role === 'assistant' ? 'assistant' : m.role,
-          content: m.content
-        }))
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    if (data.choices && data.choices[0]?.message?.content) {
-      return data.choices[0].message.content;
-    }
-    return data.content || data.text || (typeof data === 'string' ? data : JSON.stringify(data));
-  };
 
   useEffect(() => {
     if (!plansLoading && config) {
@@ -222,37 +216,6 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     }
   }, [messages]);
 
-  const handleSpeak = async (text: string, index: number) => {
-    if (isSpeaking === index) {
-      audioRef.current?.pause();
-      setIsSpeaking(null);
-      return;
-    }
-
-    setIsSpeaking(index);
-    try {
-      const audioUrl = await generateSpeech(text);
-      if (audioUrl) {
-        if (audioRef.current) {
-          audioRef.current.src = audioUrl;
-          audioRef.current.play();
-          audioRef.current.onended = () => setIsSpeaking(null);
-        } else {
-          const audio = new Audio(audioUrl);
-          audioRef.current = audio;
-          audio.play();
-          audio.onended = () => setIsSpeaking(null);
-        }
-      } else {
-        toast.error("Could not generate speech");
-        setIsSpeaking(null);
-      }
-    } catch (error) {
-      console.error("TTS Error:", error);
-      setIsSpeaking(null);
-    }
-  };
-
   const toggleListening = () => {
     if (isListening) {
       recognitionRef.current?.stop();
@@ -293,15 +256,12 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   };
 
   const handleSearchAnime = async (searchTerm: string) => {
-    try {
-      const q = query(collection(db, 'anime'), limit(20));
-      const snapshot = await getDocs(q);
-      const allAnime = snapshot.docs.map(doc => ({ id: doc.id, title: doc.data().title }));
-      const filtered = allAnime.filter(a => a.title.toLowerCase().includes(searchTerm.toLowerCase()));
-      return filtered;
-    } catch (error) {
-      return [];
-    }
+    if (!searchTerm) return [];
+    const term = searchTerm.toLowerCase();
+    return animes.filter(a => 
+      a.title.toLowerCase().includes(term) || 
+      a.genre.toLowerCase().includes(term)
+    ).slice(0, 5);
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -315,7 +275,10 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     const reader = new FileReader();
     reader.onloadend = async () => {
       const base64String = reader.result as string;
-      setMessages(prev => [...prev, { role: 'user', content: "Sent an image for analysis." }]);
+      setMessages(prev => [...prev, 
+        { role: 'user', content: "Sent an image for analysis." },
+        { role: 'bot', content: "System check kar raha hai... Please wait." }
+      ]);
       setIsAnalyzing(true);
 
       try {
@@ -350,31 +313,54 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           aiResult = { type: 'GENERAL', generalInfo: { description: "AI could not parse JSON, but here is the raw response.", reaction: aiResponse } };
         }
 
-        if (aiResult.type === 'PAYMENT') {
-          const pInfo = aiResult.paymentInfo;
-          
-          const cleanAmount = typeof pInfo.amount === 'string' 
-            ? pInfo.amount.replace(/[^0-9.]/g, '') 
-            : pInfo.amount;
-          const paid = Math.round(Number(cleanAmount) || 0);
-          const existingPending = userData?.pending_payment;
-          const totalPaidSoFar = Math.round((existingPending?.paidAmount || 0) + paid);
-
-          // Check if totalPaidSoFar matches any plan
-          // We check all prices in all currencies to be super lenient
-          // Also check if the CURRENT paid amount matches directly
-          const matchingPlan = premiumPlans.find(p => {
-            return Object.values(p.prices).some((price: any) => {
-              const planAmount = Math.round(Number(price.amount));
-              return planAmount === paid || planAmount === totalPaidSoFar;
-            });
-          });
-
-          if (matchingPlan && pInfo.status !== 'REJECTED') {
-            const price = matchingPlan.prices['IN'] || matchingPlan.prices.DEFAULT;
+          if (aiResult.type === 'PAYMENT') {
+            const pInfo = aiResult.paymentInfo;
             
-            // Use the actual matched total for the record
-            const finalPaidAmount = matchingPlan.prices['IN']?.amount || totalPaidSoFar;
+            const cleanAmount = typeof pInfo.amount === 'string' 
+              ? pInfo.amount.replace(/[^0-9.]/g, '') 
+              : pInfo.amount;
+            const paid = Math.round(Number(cleanAmount) || 0);
+            const currency = pInfo.currency || 'INR';
+            
+            const existingPending = userData?.pending_payment;
+            const totalPaidSoFar = Math.round((existingPending?.paidAmount || 0) + paid);
+
+            // Determine which price key to use
+            // We prioritize the user's country to ensure they pay the correct local price
+            const userCountry = userData?.country || 'IN';
+            let priceKey = 'DEFAULT';
+            if (userCountry === 'IN') priceKey = 'IN';
+            else if (userCountry === 'PK') priceKey = 'PK';
+            else if (userCountry === 'BD') priceKey = 'BD';
+            
+            // If AI detected a specific currency, it might override if it's a valid local currency
+            const detectedCurrency = pInfo.currency;
+            if (detectedCurrency === 'INR') priceKey = 'IN';
+            else if (detectedCurrency === 'PKR') priceKey = 'PK';
+            else if (detectedCurrency === 'BDT') priceKey = 'BD';
+
+            // Check if totalPaidSoFar matches or exceeds any plan in the determined currency
+            // CRITICAL: We only activate if the totalPaidSoFar >= planPrice
+            const matchingPlan = premiumPlans
+              .filter(p => {
+                const priceObj = p.prices[priceKey] || p.prices.DEFAULT;
+                const planPrice = Math.round(Number(priceObj.amount));
+                
+                // If we are in India (priceKey='IN'), planPrice is 50. 
+                // If totalPaidSoFar is 35, 35 >= 50 is FALSE.
+                return planPrice > 0 && totalPaidSoFar >= planPrice;
+              })
+              .sort((a, b) => {
+                const priceA = (a.prices[priceKey] || a.prices.DEFAULT).amount;
+                const priceB = (b.prices[priceKey] || b.prices.DEFAULT).amount;
+                return priceB - priceA; // Highest price first
+              })[0];
+
+            if (matchingPlan && (pInfo.status === 'APPROVED' || pInfo.status === 'PARTIAL')) {
+              const price = matchingPlan.prices[priceKey] || matchingPlan.prices.DEFAULT;
+              
+              // Use the actual matched total for the record
+              const finalPaidAmount = price.amount || totalPaidSoFar;
             
             // GENERATE REDEEM CODE FOR RECORD KEEPING
             const redeemCode = generateRedeemCode();
@@ -441,20 +427,29 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               { role: 'assistant', content: `Payment verified for ${matchingPlan.name}. I have automatically activated their premium subscription.` }
             ]);
 
-          } else if (paid > 0 && pInfo.status !== 'REJECTED') {
-            const plansList = premiumPlans.map(p => {
-              const price = p.prices['IN'] || p.prices.DEFAULT;
-              return `- **${p.name}**: ₹${price.amount}`;
-            }).join("\n");
+          } else if (paid > 0 && (pInfo.status === 'APPROVED' || pInfo.status === 'PARTIAL')) {
+            // Calculate remaining for ALL plans
+            const plansStatus = premiumPlans.map(p => {
+              const price = p.prices[priceKey] || p.prices.DEFAULT;
+              const remaining = Math.max(0, Math.round(Number(price.amount)) - totalPaidSoFar);
+              return {
+                name: p.name,
+                total: price.amount,
+                symbol: price.symbol,
+                remaining: remaining
+              };
+            });
+
+            const statusText = plansStatus.map(s => 
+              s.remaining > 0 
+                ? `Agar aapko **${s.name}** lena hai to **${s.symbol}${s.remaining}** aur dalo.`
+                : `Aapka **${s.name}** ke liye payment complete ho gaya hai!`
+            ).join("\n");
 
             // Find the next plan they are likely aiming for
-            const nextPlan = premiumPlans
-              .map(p => ({ ...p, price: (p.prices['IN'] || p.prices.DEFAULT).amount }))
-              .filter(p => p.price > totalPaidSoFar)
-              .sort((a, b) => a.price - b.price)[0];
-
+            const nextPlan = plansStatus.filter(s => s.remaining > 0).sort((a, b) => a.remaining - b.remaining)[0];
             const planName = nextPlan?.name || "Premium Plan";
-            const remainingAmount = nextPlan ? (nextPlan.price - totalPaidSoFar) : 0;
+            const remainingAmount = nextPlan?.remaining || 0;
 
             if (user) {
               await updateDoc(doc(db, 'users', user.uid), {
@@ -462,7 +457,7 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   paidAmount: totalPaidSoFar,
                   planName: planName,
                   remainingAmount: remainingAmount,
-                  currency: 'INR',
+                  currency: currency,
                   timestamp: new Date().toISOString()
                 }
               });
@@ -478,7 +473,7 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               planName: planName,
               remainingAmount: remainingAmount,
               recipient: pInfo.recipient || 'SK HAMJA',
-              currency: 'INR',
+              currency: currency,
               country: countryCode,
               transactionId: pInfo.utr || 'PARTIAL_CHATBOT',
               utr: pInfo.utr || null,
@@ -492,13 +487,13 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
             setMessages(prev => [...prev, { 
               role: 'bot', 
-              content: `Aapne **₹${paid}** bheje hain. Aapka total payment ab **₹${totalPaidSoFar}** ho gaya hai.\n\n**${planName}** activate karne ke liye aapko **₹${remainingAmount}** aur pay karne honge.\n\nHamare plans ye hain:\n${plansList}\n\nAap screenshot yahan upload kar sakte hain jab aap baki amount pay kar dein!` 
+              content: `Aapne **${currency === 'INR' ? '₹' : currency}${paid}** bheje hain. Aapka total payment ab **${currency === 'INR' ? '₹' : currency}${totalPaidSoFar}** ho gaya hai.\n\n${statusText}\n\nAap baki amount pay karke screenshot yahan upload kar sakte hain!` 
             }]);
 
             // Add to AI history for context
             setAiHistory(prev => [...prev, 
               { role: 'user', content: "Sent a partial payment screenshot for ₹" + paid },
-              { role: 'assistant', content: `I received ₹${paid}. I informed the user that it's a partial payment and listed the plans: ${plansList}` }
+              { role: 'assistant', content: `I received ₹${paid}. I informed the user that it's a partial payment and listed the plans: ${statusText}` }
             ]);
           } else {
             const telegramMessage = `❌ *AI CHATBOT REJECTED*\n\n👤 *User:* ${userData?.name || 'Anonymous'}\n📧 *Email:* ${userData?.email}\n🆔 *UTR:* ${pInfo.utr || 'N/A'}\n⚠️ *Reason:* ${pInfo.reason || 'Invalid screenshot'}`;
@@ -554,17 +549,27 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     try {
       // Check if user is asking for anime search
       let contextAddition = "";
-      if (messageToSend.toLowerCase().includes('search') || messageToSend.toLowerCase().includes('find')) {
-        const searchTerm = messageToSend.replace(/search|find/gi, '').trim();
+      const lowerInput = messageToSend.toLowerCase();
+      if (lowerInput.includes('search') || lowerInput.includes('find') || lowerInput.includes('dhundo') || lowerInput.includes('dikhao')) {
+        const searchTerm = messageToSend.replace(/search|find|dhundo|dikhao|anime/gi, '').trim();
         const results = await handleSearchAnime(searchTerm);
         if (results.length > 0) {
-          contextAddition = `\n\nContext: I found these anime in the database: ${results.map(r => r.title).join(', ')}. Mention them to the user in Hinglish.`;
+          contextAddition = `\n\n[SYSTEM CONTEXT: I found these anime in our database: ${results.map(r => r.title).join(', ')}. Please mention them to the user.]`;
         }
       }
 
+      // Ensure system message is present
+      let finalHistory = [...aiHistory];
+      if (finalHistory.length === 0 || finalHistory[0].role !== 'system') {
+        const systemMsg = {
+          role: 'system' as const,
+          content: `${config?.systemPrompt || 'You are a helpful assistant for SahidAnime. Reply in Hinglish.'}\n\n[DYNAMIC CONTEXT: User Status: ${userData?.subscription_status || 'free'}]`
+        };
+        finalHistory = [systemMsg, ...finalHistory];
+      }
+
       const newHistory: ChatMessage[] = [
-        { role: 'system', content: config?.systemPrompt || 'You are a helpful assistant for SahidAnime. Reply in Hinglish.' },
-        ...aiHistory,
+        ...finalHistory,
         { role: 'user', content: messageToSend + contextAddition }
       ];
 
@@ -572,11 +577,6 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       
       setMessages(prev => [...prev, { role: 'bot', content: response }]);
       setAiHistory([...newHistory, { role: 'assistant', content: response }]);
-
-      // Auto-speak if enabled
-      if (autoSpeak || isLiveMode) {
-        handleSpeak(response, messages.length + 1);
-      }
     } catch (error: any) {
       let errorMessage = "I'm sorry, I'm having trouble connecting to my brain right now. Please try again later.";
       
@@ -597,6 +597,58 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       exit={{ opacity: 0, y: 20, scale: 0.95 }}
       className="w-full sm:w-[450px] h-[85vh] sm:h-[600px] bg-zinc-950 border border-zinc-800 rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden fixed bottom-0 right-0 sm:bottom-6 sm:right-6 z-[100]"
     >
+      {/* Settings Overlay */}
+      <AnimatePresence>
+        {showSettings && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="absolute inset-0 z-[120] bg-zinc-950 p-6 flex flex-col"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-black tracking-tight">Bot Settings</h3>
+              <button 
+                onClick={() => setShowSettings(false)}
+                className="p-2 hover:bg-zinc-900 rounded-xl text-zinc-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+              <div>
+                <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Bot Name</label>
+                <input 
+                  type="text"
+                  value={settingsForm.botName}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, botName: e.target.value })}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 transition-all"
+                  placeholder="e.g. SahidAnime Assistant"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">System Prompt</label>
+                <textarea 
+                  value={settingsForm.systemPrompt}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, systemPrompt: e.target.value })}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 transition-all h-48 resize-none"
+                  placeholder="Describe how the bot should behave..."
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={handleSaveSettings}
+              disabled={isSavingSettings}
+              className="mt-6 w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-2xl transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {isSavingSettings ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Save Settings'}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Live Mode Overlay */}
       <AnimatePresence>
         {isLiveMode && (
@@ -630,8 +682,6 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   <Mic className="w-12 h-12 text-white animate-pulse" />
                 ) : isLoading ? (
                   <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
-                ) : isSpeaking !== null ? (
-                  <Volume2 className="w-12 h-12 text-green-500 animate-bounce" />
                 ) : (
                   <Bot className="w-12 h-12 text-zinc-500" />
                 )}
@@ -639,7 +689,7 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             </div>
 
             <h2 className="text-2xl font-black mb-2 tracking-tight">
-              {isListening ? "Listening..." : isLoading ? "Thinking..." : isSpeaking !== null ? "Speaking..." : "Ready to Talk"}
+              {isListening ? "Listening..." : isLoading ? "Thinking..." : "Ready to Talk"}
             </h2>
             <p className="text-zinc-500 text-sm max-w-xs mb-8">
               {isListening ? "Aap bol sakte hain, main sun raha hoon." : "Tap the mic to start talking to me in real-time."}
@@ -683,6 +733,18 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {userData?.role === 'admin' && (
+            <button 
+              onClick={() => setShowSettings(!showSettings)}
+              className={cn(
+                "p-2 rounded-xl transition-all",
+                showSettings ? "bg-blue-600 text-white" : "bg-zinc-800 text-zinc-400 hover:text-white"
+              )}
+              title="Bot Settings"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          )}
           <button 
             onClick={() => setIsLiveMode(!isLiveMode)}
             className={cn(
@@ -691,7 +753,6 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             )}
             title="Live Voice Mode"
           >
-            <Mic className="w-4 h-4" />
             <span className="text-[10px] font-bold uppercase hidden sm:inline">Live</span>
           </button>
           <button 
@@ -743,15 +804,6 @@ export const AIChatbot: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 ? "bg-blue-600 text-white rounded-tr-none" 
                 : "bg-zinc-900 border border-zinc-800 text-zinc-300 rounded-tl-none"
             )}>
-              {msg.role === 'bot' && (
-                <button
-                  onClick={() => handleSpeak(msg.content, i)}
-                  className="absolute -right-10 top-0 p-2 bg-zinc-800 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-zinc-700 text-zinc-400 hover:text-white"
-                  title="Listen to message"
-                >
-                  {isSpeaking === i ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                </button>
-              )}
               {msg.role === 'bot' ? (
                 <div className="markdown-body prose prose-invert max-w-none">
                   <ReactMarkdown 

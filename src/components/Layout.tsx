@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { 
   Home, 
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useAnime } from '../context/AnimeContext';
 import { auth } from '../firebase/firebase';
 import { signOut } from 'firebase/auth';
 import { cn } from '../lib/utils';
@@ -30,10 +31,22 @@ import { handleFirestoreError, OperationType } from '../firebase/firestoreError'
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const { user, userData } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { searchQuery, setSearchQuery } = useAnime();
   const location = useLocation();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (isSearchOpen) {
+      const timer = setTimeout(() => {
+        const searchInput = document.querySelector('input[placeholder="Search your favorite anime..."]') as HTMLInputElement;
+        if (searchInput) searchInput.focus();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isSearchOpen]);
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -174,21 +187,48 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             <Menu className="w-6 h-6" />
           </button>
 
-          <div className="flex-1 max-w-2xl mx-8 hidden md:block">
+          <div className={cn(
+            "flex-1 max-w-2xl mx-8",
+            isSearchOpen ? "block" : "hidden md:block"
+          )}>
             <div className="relative group">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 group-focus-within:text-blue-500 transition-colors" />
               <input 
                 type="text" 
                 placeholder="Search your favorite anime..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onBlur={() => setIsSearchOpen(false)}
                 className={cn(
                   "w-full border-2 rounded-2xl py-2.5 pl-12 pr-6 text-sm font-bold focus:outline-none focus:border-blue-500 transition-all shadow-sm",
                   theme === 'dark' ? "bg-zinc-900 border-zinc-800 text-white" : "bg-zinc-100 border-zinc-200 text-zinc-900"
                 )}
+                autoFocus={isSearchOpen}
               />
+              {isSearchOpen && (
+                <button 
+                  onClick={() => setIsSearchOpen(false)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-900 dark:hover:text-white md:hidden"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 lg:gap-4">
+            {!isSearchOpen && (
+              <button 
+                onClick={() => setIsSearchOpen(true)}
+                className={cn(
+                  "md:hidden p-2.5 rounded-xl transition-all hover:scale-110 active:scale-95",
+                  theme === 'dark' ? "bg-zinc-900 text-zinc-400" : "bg-zinc-100 text-zinc-500"
+                )}
+              >
+                <Search className="w-5 h-5" />
+              </button>
+            )}
+
             <button 
               onClick={toggleTheme}
               className={cn(
